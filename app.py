@@ -4,29 +4,31 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import os
+import urllib.request
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Аналитика ЮЦ", layout="wide")
 st.title("📊 Дэшборд аналитики сотрудников и ЮЦ")
 
-# --- Глобальная палитра цветов ---
+# --- Глобальная палитра цветов (С ИСПРАВЛЕННЫМ НАЗВАНИЕМ) ---
 COLORS_MAP = {
     'Судебные дела': '#636EFA',  # Синий
-    'претензии': '#EF553B',  # Красный
+    'Претензии': '#EF553B',  # Красный (Было 'претензии')
     'Административные дела': '#00CC96',  # Зеленый
     'Судебные дела (мало)': '#A0A0A0',  # Серый
-    'претензии (мало)': '#B0B0B0',  # Светло-серый
+    'Претензии (мало)': '#B0B0B0',  # Светло-серый
     'Административные дела (мало)': '#808080'  # Темно-серый
 }
 
 
-# --- 1. Загрузка данных (Статистика) ---
+# --- 1. Загрузка данных ---
 @st.cache_data
 def load_data():
     df_stats = pd.DataFrame()
     file_path = 'statistics.xlsx'
 
     try:
+        # Пробуем Excel
         xls = pd.ExcelFile(file_path)
         df_stats = pd.read_excel(xls, sheet_name=0)
     except Exception as e:
@@ -39,23 +41,48 @@ def load_data():
     return df_stats
 
 
-# --- 2. Загрузка карты (ТЕПЕРЬ ПРОСТАЯ) ---
+# --- 2. Загрузка карты (Простая версия с подготовленным файлом) ---
 @st.cache_data
 def load_geojson():
-    # Мы используем подготовленный файл
+    # Используем файл, который вы создали скриптом prepare_map.py
+    # Если его нет, попробуем russia.geojson и на лету исправим (резервный вариант)
     filename = 'final_russia.geojson'
 
-    if not os.path.exists(filename):
-        st.error(f"❌ Файл карты '{filename}' не найден!")
-        st.info("Запустите вспомогательный скрипт prepare_map.py, чтобы создать этот файл из russia.geojson.")
-        return None
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            pass
 
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        st.error(f"Ошибка чтения файла карты: {e}")
-        return None
+    # Резерв: читаем russia.geojson и исправляем на лету
+    if os.path.exists('russia.geojson'):
+        try:
+            with open('russia.geojson', 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+
+            # Быстрая конвертация (Lat/Lon swap)
+            features = []
+            for region_name, parts in raw_data.items():
+                multi_polygon_coords = []
+                for part_id in sorted(parts.keys()):
+                    points = parts[part_id]
+                    ring = []
+                    for p in points:
+                        if len(p) >= 2:
+                            ring.append([p[1], p[0]])
+                    multi_polygon_coords.append([ring])
+                feature = {
+                    "type": "Feature",
+                    "properties": {"name": region_name},
+                    "geometry": {"type": "MultiPolygon", "coordinates": multi_polygon_coords}
+                }
+                features.append(feature)
+            return {"type": "FeatureCollection", "features": features}
+        except:
+            return None
+
+    return None
 
 
 # --- 3. Обработка статистики ---
@@ -73,9 +100,11 @@ def preprocess_stats(df):
     df_melted['Год'] = extracted[0].astype(float).astype('Int64')
     df_melted['Тип'] = extracted[1]
 
+    # --- ВАЖНО: Приводим все названия к единому стилю с Большой буквы ---
     df_melted['Тип'] = df_melted['Тип'].replace({
         'СД': 'Судебные дела',
-        'АД': 'Административные дела'
+        'АД': 'Административные дела',
+        'претензии': 'Претензии'  # Исправили на заглавную
     })
 
     return df_melted.dropna(subset=['Год', 'Тип']).drop(columns=['Year_Metric'])
@@ -143,16 +172,21 @@ if not df_raw.empty:
     # --- TAB 1: Сотрудники ---
     with tab1:
         st.header("Сравнение сотрудников")
+
+        # Информационная плашка с легендой значков
+        st.info(
+            "ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе")
+
         col_sw1, col_sw2, col_sw3, col_sw4 = st.columns([1, 1, 1, 1])
         show_sd_emp = col_sw1.toggle("Судебные дела", value=True, key="emp_sd")
         show_ad_emp = col_sw2.toggle("Административные дела", value=True, key="emp_ad")
         show_pret_emp = col_sw3.toggle("Претензии", value=True, key="emp_pret")
-        show_low = col_sw4.toggle("Показать малоактивных (⚠️)", value=True, key="emp_low")
+        show_low = col_sw4.toggle("Показать уволенных (⚠️)", value=True, key="emp_low")
 
         selected_types_emp = []
         if show_sd_emp: selected_types_emp.append("Судебные дела")
         if show_ad_emp: selected_types_emp.append("Административные дела")
-        if show_pret_emp: selected_types_emp.append("претензии")
+        if show_pret_emp: selected_types_emp.append("Претензии")  # С большой буквы
 
         st.divider()
 
@@ -186,15 +220,34 @@ if not df_raw.empty:
 
 
                     def cat_color(row):
-                        return f"{row['Тип']} (мало)" if row['Сотрудник'] in low_activity_set else row['Тип']
+                        # Логика для "серых" столбцов
+                        suffix = " (мало)" if row['Сотрудник'] in low_activity_set else ""
+                        return f"{row['Тип']}{suffix}"
 
 
                     df_sub['Cat'] = df_sub.apply(cat_color, axis=1)
 
                     grp = df_sub.groupby(['Display', 'Cat'])['Value'].sum().reset_index()
-                    st.plotly_chart(px.bar(grp, x='Display', y='Value', color='Cat',
-                                           color_discrete_map=COLORS_MAP, text_auto=True), use_container_width=True)
-                    with st.expander("Таблица"):
+
+                    # Рисуем график
+                    fig = px.bar(grp, x='Display', y='Value', color='Cat',
+                                 color_discrete_map=COLORS_MAP, text_auto=True,
+                                 title="Сравнительная гистограмма нагрузки")
+
+                    # Обновляем легенду графика для красоты
+                    new_names = {
+                        'Судебные дела': 'Судебные дела',
+                        'Претензии': 'Претензии',
+                        'Административные дела': 'Административные дела',
+                        'Судебные дела (мало)': 'Судебные дела (неактивен)',
+                        'Претензии (мало)': 'Претензии (неактивен)',
+                        'Административные дела (мало)': 'Административные дела (неактивен)'
+                    }
+                    fig.for_each_trace(lambda t: t.update(name=new_names.get(t.name, t.name)))
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    with st.expander("Таблица данных"):
                         st.dataframe(
                             df_sub.pivot_table(index='Сотрудник', columns=['Год', 'Тип'], values='Value', fill_value=0))
 
@@ -202,9 +255,9 @@ if not df_raw.empty:
     with tab2:
         grp_yu = df_main.groupby(['ЮЦ', 'Тип'])['Value'].sum().reset_index()
         if not grp_yu.empty:
-            st.plotly_chart(px.bar(grp_yu, x='ЮЦ', y='Value', color='Тип',
-                                   color_discrete_map=COLORS_MAP, barmode='group', text_auto=True),
-                            use_container_width=True)
+            fig_yu = px.bar(grp_yu, x='ЮЦ', y='Value', color='Тип',
+                            color_discrete_map=COLORS_MAP, barmode='group', text_auto=True)
+            st.plotly_chart(fig_yu, use_container_width=True)
 
     # --- TAB 3: Тренды ---
     with tab3:
@@ -246,7 +299,7 @@ if not df_raw.empty:
             sel_types_map = []
             if show_sd_map: sel_types_map.append("Судебные дела")
             if show_ad_map: sel_types_map.append("Административные дела")
-            if show_pret_map: sel_types_map.append("претензии")
+            if show_pret_map: sel_types_map.append("Претензии")
 
             if not sel_types_map:
                 st.warning("⚠️ Выберите тип нагрузки.")
@@ -254,24 +307,23 @@ if not df_raw.empty:
                 df_map_filtered = df[(df['Год'] == 2025) & (df['Тип'].isin(sel_types_map))]
                 df_2025_reg = df_map_filtered.groupby('Регион')['Value'].sum().reset_index()
 
-                # --- ПОДГОТОВКА ДАННЫХ ДЛЯ КАРТЫ ---
-                # 1. Получаем список всех регионов с карты
-                all_map_regs = [f['properties']['name'] for f in geojson['features']]
+                # Подготовка карты
+                name_key = 'name'
+                if geojson.get('features') and 'name' not in geojson['features'][0]['properties']:
+                    props = geojson['features'][0]['properties']
+                    for k in ['name', 'name_ru', 'latin_name', 'NAME_1']:
+                        if k in props: name_key = k; break
 
-                # 2. Создаем датафрейм со всеми регионами
+                all_map_regs = [f['properties'][name_key] for f in geojson['features']]
                 df_full = pd.DataFrame({'Регион': all_map_regs})
-
-                # 3. Присоединяем данные (где данных нет -> 0)
                 df_plot = pd.merge(df_full, df_2025_reg, on='Регион', how='left').fillna(0)
 
-                # 4. Разделяем на "Есть нагрузка" и "Нет нагрузки"
                 df_active = df_plot[df_plot['Value'] > 0]
                 df_zero = df_plot[df_plot['Value'] == 0]
 
-                # 5. Слой 1: Активные регионы (Цветная шкала)
                 if not df_active.empty:
                     fig_map = px.choropleth_mapbox(
-                        df_active, geojson=geojson, locations='Регион', featureidkey='properties.name',
+                        df_active, geojson=geojson, locations='Регион', featureidkey=f'properties.{name_key}',
                         color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="carto-positron",
                         zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.6,
                         hover_name='Регион', hover_data={'Регион': False, 'Value': True},
@@ -283,13 +335,12 @@ if not df_raw.empty:
                         mapbox_style="carto-positron", zoom=2.5, center={"lat": 60, "lon": 95}
                     ))
 
-                # 6. Слой 2: Нулевые регионы (Серый цвет)
                 if not df_zero.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
                         geojson=geojson,
                         locations=df_zero['Регион'],
                         z=[1] * len(df_zero),
-                        featureidkey='properties.name',
+                        featureidkey=f'properties.{name_key}',
                         colorscale=[[0, 'gray'], [1, 'gray']],
                         showscale=False,
                         marker_opacity=0.4,
