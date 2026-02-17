@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import os
-import urllib.request
 
 # --- Настройка страницы ---
 st.set_page_config(page_title="Аналитика ЮЦ", layout="wide")
@@ -21,14 +20,13 @@ COLORS_MAP = {
 }
 
 
-# --- 1. Загрузка данных ---
+# --- 1. Загрузка данных (Статистика) ---
 @st.cache_data
 def load_data():
     df_stats = pd.DataFrame()
     file_path = 'statistics.xlsx'
 
     try:
-        # Пробуем Excel
         xls = pd.ExcelFile(file_path)
         df_stats = pd.read_excel(xls, sheet_name=0)
     except Exception as e:
@@ -41,73 +39,31 @@ def load_data():
     return df_stats
 
 
-# --- 2. Исправление GeoJSON ---
-def fix_custom_geojson(raw_data):
-    features = []
-    for region_name, parts in raw_data.items():
-        multi_polygon_coords = []
-        for part_id in sorted(parts.keys()):
-            points = parts[part_id]
-            # Меням Lat/Lon местами
-            ring = []
-            for p in points:
-                if len(p) >= 2:
-                    ring.append([p[1], p[0]])
-            multi_polygon_coords.append([ring])
-
-        feature = {
-            "type": "Feature",
-            "properties": {"name": region_name},
-            "geometry": {"type": "MultiPolygon", "coordinates": multi_polygon_coords}
-        }
-        features.append(feature)
-
-    return {"type": "FeatureCollection", "features": features}
-
-
-# --- 3. Загрузка карты ---
+# --- 2. Загрузка карты (ТЕПЕРЬ ПРОСТАЯ) ---
 @st.cache_data
 def load_geojson():
-    local_file = 'russia.geojson'
-    data = None
+    # Мы используем подготовленный файл
+    filename = 'final_russia.geojson'
 
-    # 1. Локальный
-    if os.path.exists(local_file):
-        try:
-            with open(local_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            st.warning(f"Ошибка чтения 'russia.geojson': {e}")
-
-    # 2. Онлайн
-    if data is None:
-        url = "https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/russia.geojson"
-        try:
-            with urllib.request.urlopen(url) as response:
-                data = json.load(response)
-        except Exception:
-            pass
-
-    if data is None:
+    if not os.path.exists(filename):
+        st.error(f"❌ Файл карты '{filename}' не найден!")
+        st.info("Запустите вспомогательный скрипт prepare_map.py, чтобы создать этот файл из russia.geojson.")
         return None
 
-    # Исправление формата
-    if isinstance(data, dict) and 'features' not in data:
-        try:
-            data = fix_custom_geojson(data)
-        except Exception:
-            return None
-
-    return data
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Ошибка чтения файла карты: {e}")
+        return None
 
 
-# --- 4. Обработка статистики ---
+# --- 3. Обработка статистики ---
 def preprocess_stats(df):
     id_vars = ['ЮЦ', 'Сотрудник']
     if 'Регион' in df.columns:
         id_vars.append('Регион')
 
-    # Ищем только колонки с годами
     value_vars = [c for c in df.columns if '20' in str(c) and '(' in str(c)]
 
     df_melted = df.melt(id_vars=id_vars, value_vars=value_vars, var_name='Year_Metric', value_name='Value')
@@ -117,7 +73,6 @@ def preprocess_stats(df):
     df_melted['Год'] = extracted[0].astype(float).astype('Int64')
     df_melted['Тип'] = extracted[1]
 
-    # Замена сокращений
     df_melted['Тип'] = df_melted['Тип'].replace({
         'СД': 'Судебные дела',
         'АД': 'Административные дела'
@@ -140,22 +95,17 @@ def identify_low_activity(df, threshold=5):
 
 
 def get_crown_employees(df):
-    """Ищет сотрудников с пометкой X в спец. колонке"""
     target_col = None
     possible_names = ['работник юц', 'сотрудник юц', 'признак', 'статус', 'работник']
-
     for col in df.columns:
         if isinstance(col, str):
             c_low = col.lower().strip()
             if any(key in c_low for key in possible_names):
                 target_col = col
                 break
-
     if target_col:
-        # Ищем 'X', 'x', 'Х', 'х'
         mask = df[target_col].astype(str).str.contains(r'[xXхХ]', na=False)
         return set(df[mask]['Сотрудник'].unique())
-
     return set()
 
 
@@ -167,7 +117,7 @@ if not df_raw.empty:
     low_activity_set = identify_low_activity(df)
     crown_employees_set = get_crown_employees(df_raw)
 
-    # --- SIDEBAR (Фильтры) ---
+    # --- SIDEBAR ---
     st.sidebar.header("Фильтры")
 
     st.sidebar.subheader("Юридические Центры")
@@ -177,7 +127,6 @@ if not df_raw.empty:
         is_checked = (yc == "Дальний Восток")
         if st.sidebar.checkbox(yc, value=is_checked, key=f"check_{yc}"):
             selected_yuc.append(yc)
-
     df_filtered_by_yuc = df[df['ЮЦ'].isin(selected_yuc)]
 
     st.sidebar.subheader("Годы")
@@ -186,7 +135,6 @@ if not df_raw.empty:
     for year in all_years:
         if st.sidebar.checkbox(str(year), value=True, key=f"year_{year}"):
             selected_years.append(year)
-
     df_main = df_filtered_by_yuc[df_filtered_by_yuc['Год'].isin(selected_years)].copy()
 
     # --- TABS ---
@@ -195,10 +143,7 @@ if not df_raw.empty:
     # --- TAB 1: Сотрудники ---
     with tab1:
         st.header("Сравнение сотрудников")
-
-        st.write("##### Фильтр типов нагрузки:")
         col_sw1, col_sw2, col_sw3, col_sw4 = st.columns([1, 1, 1, 1])
-
         show_sd_emp = col_sw1.toggle("Судебные дела", value=True, key="emp_sd")
         show_ad_emp = col_sw2.toggle("Административные дела", value=True, key="emp_ad")
         show_pret_emp = col_sw3.toggle("Претензии", value=True, key="emp_pret")
@@ -212,14 +157,11 @@ if not df_raw.empty:
         st.divider()
 
         raw_emps = sorted(df_filtered_by_yuc['Сотрудник'].unique())
-
         emp_map = {}
         for n in raw_emps:
             prefix = ""
-            if n in crown_employees_set:
-                prefix += "👑 "
-            if n in low_activity_set:
-                prefix += "⚠️ "
+            if n in crown_employees_set: prefix += "👑 "
+            if n in low_activity_set: prefix += "⚠️ "
             emp_map[n] = prefix + n
 
         opts = [emp_map[n] for n in raw_emps if show_low or n not in low_activity_set]
@@ -250,7 +192,6 @@ if not df_raw.empty:
                     df_sub['Cat'] = df_sub.apply(cat_color, axis=1)
 
                     grp = df_sub.groupby(['Display', 'Cat'])['Value'].sum().reset_index()
-
                     st.plotly_chart(px.bar(grp, x='Display', y='Value', color='Cat',
                                            color_discrete_map=COLORS_MAP, text_auto=True), use_container_width=True)
                     with st.expander("Таблица"):
@@ -286,7 +227,7 @@ if not df_raw.empty:
             fig.update_layout(xaxis=dict(tickmode='linear', tick0=2023, dtick=1))
             st.plotly_chart(fig, use_container_width=True)
 
-    # --- TAB 4: КАРТА (ОБНОВЛЕННАЯ ПОДСКАЗКА) ---
+    # --- TAB 4: КАРТА ---
     with tab4:
         st.header("🗺️ Карта нагрузки (2025)")
         geojson = load_geojson()
@@ -313,29 +254,24 @@ if not df_raw.empty:
                 df_map_filtered = df[(df['Год'] == 2025) & (df['Тип'].isin(sel_types_map))]
                 df_2025_reg = df_map_filtered.groupby('Регион')['Value'].sum().reset_index()
 
-                # Подготовка списка регионов
-                name_key = 'name'
-                if geojson.get('features') and 'name' not in geojson['features'][0]['properties']:
-                    props = geojson['features'][0]['properties']
-                    for k in ['name', 'name_ru', 'latin_name', 'NAME_1']:
-                        if k in props: name_key = k; break
+                # --- ПОДГОТОВКА ДАННЫХ ДЛЯ КАРТЫ ---
+                # 1. Получаем список всех регионов с карты
+                all_map_regs = [f['properties']['name'] for f in geojson['features']]
 
-                all_map_regs = []
-                if geojson.get('features'):
-                    for f in geojson['features']:
-                        if name_key in f['properties']: all_map_regs.append(f['properties'][name_key])
-
+                # 2. Создаем датафрейм со всеми регионами
                 df_full = pd.DataFrame({'Регион': all_map_regs})
+
+                # 3. Присоединяем данные (где данных нет -> 0)
                 df_plot = pd.merge(df_full, df_2025_reg, on='Регион', how='left').fillna(0)
 
-                # РАЗДЕЛЕНИЕ НА АКТИВНЫЕ И НУЛЕВЫЕ
+                # 4. Разделяем на "Есть нагрузка" и "Нет нагрузки"
                 df_active = df_plot[df_plot['Value'] > 0]
                 df_zero = df_plot[df_plot['Value'] == 0]
 
-                # 1. Активные
+                # 5. Слой 1: Активные регионы (Цветная шкала)
                 if not df_active.empty:
                     fig_map = px.choropleth_mapbox(
-                        df_active, geojson=geojson, locations='Регион', featureidkey=f'properties.{name_key}',
+                        df_active, geojson=geojson, locations='Регион', featureidkey='properties.name',
                         color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="carto-positron",
                         zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.6,
                         hover_name='Регион', hover_data={'Регион': False, 'Value': True},
@@ -347,19 +283,18 @@ if not df_raw.empty:
                         mapbox_style="carto-positron", zoom=2.5, center={"lat": 60, "lon": 95}
                     ))
 
-                # 2. Нулевые (Серые) - с обновленным шаблоном
+                # 6. Слой 2: Нулевые регионы (Серый цвет)
                 if not df_zero.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
                         geojson=geojson,
                         locations=df_zero['Регион'],
                         z=[1] * len(df_zero),
-                        featureidkey=f'properties.{name_key}',
+                        featureidkey='properties.name',
                         colorscale=[[0, 'gray'], [1, 'gray']],
                         showscale=False,
                         marker_opacity=0.4,
                         marker_line_width=0.5,
                         name='Нет нагрузки',
-                        # --- СТИЛЬ ПОДСКАЗКИ ---
                         hovertemplate='<b>%{location}</b><br>нет юриста<extra></extra>'
                     ))
 
