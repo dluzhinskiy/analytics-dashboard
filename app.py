@@ -219,8 +219,7 @@ if not df_raw.empty:
     )
 
     # --- ДИНАМИЧЕСКАЯ БОКОВАЯ ПАНЕЛЬ ---
-    # Главный заголовок перенесен сюда
-    st.sidebar.title("📊 Дэшборд аналитики сотрудников и ЮЦ")
+    st.sidebar.title("📊 Дэшборд аналитики")
     st.sidebar.divider()
 
     st.sidebar.header("Фильтры")
@@ -436,12 +435,12 @@ if not df_raw.empty:
                 df_zero_selected = df_plot[(df_plot['Value'] == 0) & is_selected_yuc]
                 df_other = df_plot[~is_selected_yuc]
 
-                # --- СЛОЙ 1: Выбранные активные ---
+                # --- СЛОЙ 1: Выбранные активные (БЕЗ ЖЕСТКОГО ZOOM/CENTER) ---
                 if not df_active_selected.empty:
                     fig_map = px.choropleth_mapbox(
                         df_active_selected, geojson=geojson, locations='Регион', featureidkey='properties.name',
-                        color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="carto-positron",
-                        zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.8,
+                        color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="white-bg",
+                        opacity=0.8,
                         custom_data=['Hover_Text'],
                         labels={'Value': 'Нагрузка'}
                     )
@@ -455,9 +454,7 @@ if not df_raw.empty:
                         geojson=geojson, locations=[], z=[]
                     ))
                     fig_map.update_layout(
-                        mapbox_style="carto-positron",
-                        mapbox_zoom=2.5,
-                        mapbox_center={"lat": 60, "lon": 95}
+                        mapbox_style="white-bg"
                     )
 
                 # --- СЛОЙ 2: Другие ЮЦ (Фоновые) ---
@@ -494,9 +491,12 @@ if not df_raw.empty:
                         hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
+                # Жесткая фиксация камеры
                 fig_map.update_layout(
                     margin={"r": 0, "t": 0, "l": 0, "b": 0},
-                    height=700
+                    height=800,
+                    mapbox_zoom=2.2,  # Приближение (зум)
+                    mapbox_center={"lat": 65, "lon": 100}  # Центр над Сибирью
                 )
 
                 st.plotly_chart(fig_map, use_container_width=True)
