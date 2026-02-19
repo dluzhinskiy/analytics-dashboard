@@ -31,6 +31,7 @@ def load_data():
         xls = pd.ExcelFile(file_path)
         df_stats = pd.read_excel(xls, sheet_name=0)
 
+        # Читаем Лист 2 (Справочник ЮЦ)
         if len(xls.sheet_names) > 1:
             df_mapping_raw = pd.read_excel(xls, sheet_name=1)
             reg_col, yuc_col = None, None
@@ -57,10 +58,7 @@ def load_data():
                 df_mapping['ЮЦ'] = df_mapping['ЮЦ'].astype(str).str.strip()
 
     except Exception as e:
-        try:
-            df_stats = pd.read_csv('statistics.xlsx - Лист1.csv')
-        except:
-            st.error(f"Ошибка загрузки данных: {e}")
+        st.error(f"❌ Ошибка загрузки файла '{file_path}': {e}")
 
     if not df_stats.empty:
         if 'ЮЦ' in df_stats.columns:
@@ -89,14 +87,13 @@ def load_geojson():
         return None
 
 
-# --- 3. Обработка статистики ---
+# --- 3. Вспомогательные функции ---
 def preprocess_stats(df):
     id_vars = ['ЮЦ', 'Сотрудник']
     if 'Регион' in df.columns:
         id_vars.append('Регион')
 
     value_vars = [c for c in df.columns if '20' in str(c) and '(' in str(c)]
-
     df_melted = df.melt(id_vars=id_vars, value_vars=value_vars, var_name='Year_Metric', value_name='Value')
 
     pattern = r'(\d{4})\s\((.*?)\)'
@@ -131,14 +128,37 @@ def get_crown_employees(df):
     possible_names = ['работник юц', 'сотрудник юц', 'признак', 'статус', 'работник']
     for col in df.columns:
         if isinstance(col, str):
-            c_low = col.lower().strip()
-            if any(key in c_low for key in possible_names):
+            if any(key in col.lower().strip() for key in possible_names):
                 target_col = col
                 break
     if target_col:
         mask = df[target_col].astype(str).str.contains(r'[xXхХ]', na=False)
         return set(df[mask]['Сотрудник'].unique())
     return set()
+
+
+# --- Единая функция для отрисовки фильтров нагрузки ---
+def get_load_type_filters(prefix, show_low_option=False):
+    st.write("##### Фильтр типов нагрузки:")
+
+    if show_low_option:
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+        show_low = c4.toggle("Показать уволенных (⚠️)", value=False, key=f"{prefix}_low")
+    else:
+        c1, c2, c3 = st.columns(3)
+        show_low = False
+
+    show_sd = c1.toggle("Судебные дела", value=True, key=f"{prefix}_sd")
+    show_ad = c2.toggle("Административные дела", value=True, key=f"{prefix}_ad")
+    show_pret = c3.toggle("Претензии", value=True, key=f"{prefix}_pret")
+
+    selected = []
+    if show_sd: selected.append("Судебные дела")
+    if show_ad: selected.append("Административные дела")
+    if show_pret: selected.append("Претензии")
+
+    st.divider()
+    return selected, show_low
 
 
 # --- START APP ---
@@ -175,24 +195,9 @@ if not df_raw.empty:
     # --- TAB 1: Сотрудники ---
     with tab1:
         st.header("Сравнение сотрудников")
+        st.info("ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе")
 
-        st.info(
-            "ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе")
-
-        st.write("##### Фильтр типов нагрузки:")
-        col_sw1, col_sw2, col_sw3, col_sw4 = st.columns([1, 1, 1, 1])
-        show_sd_emp = col_sw1.toggle("Судебные дела", value=True, key="emp_sd")
-        show_ad_emp = col_sw2.toggle("Административные дела", value=True, key="emp_ad")
-        show_pret_emp = col_sw3.toggle("Претензии", value=True, key="emp_pret")
-        # ИЗМЕНЕНИЕ 1: Выключено по умолчанию (value=False)
-        show_low = col_sw4.toggle("Показать уволенных (⚠️)", value=False, key="emp_low")
-
-        selected_types_emp = []
-        if show_sd_emp: selected_types_emp.append("Судебные дела")
-        if show_ad_emp: selected_types_emp.append("Административные дела")
-        if show_pret_emp: selected_types_emp.append("Претензии")
-
-        st.divider()
+        selected_types_emp, show_low = get_load_type_filters("emp", show_low_option=True)
 
         raw_emps = sorted(df_filtered_by_yuc['Сотрудник'].unique())
         emp_map = {}
@@ -229,7 +234,6 @@ if not df_raw.empty:
 
 
                     df_sub['Cat'] = df_sub.apply(cat_color, axis=1)
-
                     grp = df_sub.groupby(['Display', 'Cat'])['Value'].sum().reset_index()
 
                     fig = px.bar(grp, x='Display', y='Value', color='Cat',
@@ -252,18 +256,7 @@ if not df_raw.empty:
     with tab2:
         st.header("Сравнение Юридических Центров")
 
-        st.write("##### Фильтр типов нагрузки:")
-        col_y1, col_y2, col_y3 = st.columns(3)
-        show_sd_yuc = col_y1.toggle("Судебные дела", value=True, key="yuc_sd")
-        show_ad_yuc = col_y2.toggle("Административные дела", value=True, key="yuc_ad")
-        show_pret_yuc = col_y3.toggle("Претензии", value=True, key="yuc_pret")
-
-        sel_types_yuc = []
-        if show_sd_yuc: sel_types_yuc.append("Судебные дела")
-        if show_ad_yuc: sel_types_yuc.append("Административные дела")
-        if show_pret_yuc: sel_types_yuc.append("Претензии")
-
-        st.divider()
+        sel_types_yuc, _ = get_load_type_filters("yuc")
 
         if not sel_types_yuc:
             st.warning("⚠️ Выберите хотя бы один тип нагрузки.")
@@ -284,18 +277,7 @@ if not df_raw.empty:
         trend_mode = st.radio("Что сравниваем?", ["Типы нагрузки (Структура)", "Юридические Центры (Сравнение)"],
                               horizontal=True)
 
-        st.write("##### Фильтр типов нагрузки:")
-        col_t1, col_t2, col_t3 = st.columns(3)
-        show_sd_trend = col_t1.toggle("Судебные дела", value=True, key="trend_sd")
-        show_ad_trend = col_t2.toggle("Административные дела", value=True, key="trend_ad")
-        show_pret_trend = col_t3.toggle("Претензии", value=True, key="trend_pret")
-
-        sel_types_trend = []
-        if show_sd_trend: sel_types_trend.append("Судебные дела")
-        if show_ad_trend: sel_types_trend.append("Административные дела")
-        if show_pret_trend: sel_types_trend.append("Претензии")
-
-        st.divider()
+        sel_types_trend, _ = get_load_type_filters("trend")
 
         if not sel_types_trend:
             st.warning("⚠️ Выберите хотя бы один тип нагрузки.")
@@ -305,13 +287,11 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                # ИЗМЕНЕНИЕ 2: Логика отрисовки бублика при 1 выбранном годе
                 if trend_mode == "Типы нагрузки (Структура)":
                     df_grp = df_trend_filtered.groupby(['Год', 'Тип'])['Value'].sum().reset_index()
                     unique_years = df_grp['Год'].unique()
 
                     if len(unique_years) == 1:
-                        # Рисуем Бублик (Donut Chart)
                         total_sum = df_grp['Value'].sum()
                         year_val = unique_years[0]
                         fig = px.pie(
@@ -319,14 +299,12 @@ if not df_raw.empty:
                             color_discrete_map=COLORS_MAP, hole=0.5,
                             title=f"Структура нагрузки за {year_val} год"
                         )
-                        # Добавляем сумму внутрь
                         fig.update_traces(textposition='inside', textinfo='percent+value')
                         fig.update_layout(
                             annotations=[dict(text=f"<b>Всего:</b><br>{int(total_sum)}", x=0.5, y=0.5, font_size=20,
                                               showarrow=False)]
                         )
                     else:
-                        # Рисуем Линейный график
                         fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True,
                                       color_discrete_map=COLORS_MAP)
                         fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
@@ -335,11 +313,9 @@ if not df_raw.empty:
                     unique_years = df_grp['Год'].unique()
 
                     if len(unique_years) == 1:
-                        # Рисуем гистограмму, так как линия из 1 точки неинформативна
                         fig = px.bar(df_grp, x='ЮЦ', y='Value', color='ЮЦ', text_auto=True,
                                      title=f"Сравнение ЮЦ за {unique_years[0]} год")
                     else:
-                        # Рисуем Линейный график
                         fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
                         fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
 
@@ -355,18 +331,7 @@ if not df_raw.empty:
         elif geojson is None:
             st.error("❌ Не удалось загрузить карту.")
         else:
-            st.write("##### Фильтр типов нагрузки:")
-            c1, c2, c3 = st.columns(3)
-            show_sd_map = c1.toggle("Судебные дела", value=True, key="map_sd")
-            show_ad_map = c2.toggle("Административные дела", value=True, key="map_ad")
-            show_pret_map = c3.toggle("Претензии", value=True, key="map_pret")
-
-            sel_types_map = []
-            if show_sd_map: sel_types_map.append("Судебные дела")
-            if show_ad_map: sel_types_map.append("Административные дела")
-            if show_pret_map: sel_types_map.append("Претензии")
-
-            st.divider()
+            sel_types_map, _ = get_load_type_filters("map")
 
             if not sel_types_map:
                 st.warning("⚠️ Выберите хотя бы один тип нагрузки, чтобы увидеть данные на карте.")
@@ -383,13 +348,8 @@ if not df_raw.empty:
                     if col not in df_pivot.columns:
                         df_pivot[col] = 0
 
-                name_key = 'name'
-                if geojson.get('features') and 'name' not in geojson['features'][0]['properties']:
-                    props = geojson['features'][0]['properties']
-                    for k in ['name', 'name_ru', 'latin_name', 'NAME_1']:
-                        if k in props: name_key = k; break
-
-                all_map_regs = [f['properties'][name_key] for f in geojson['features']]
+                # Оптимизированное получение регионов
+                all_map_regs = [f['properties']['name'] for f in geojson['features']]
                 df_full = pd.DataFrame({'Регион': all_map_regs})
 
                 df_plot = pd.merge(df_full, df_pivot, on='Регион', how='left').fillna(0)
@@ -436,7 +396,7 @@ if not df_raw.empty:
                 # --- СЛОЙ 1: Выбранные активные ---
                 if not df_active_selected.empty:
                     fig_map = px.choropleth_mapbox(
-                        df_active_selected, geojson=geojson, locations='Регион', featureidkey=f'properties.{name_key}',
+                        df_active_selected, geojson=geojson, locations='Регион', featureidkey='properties.name',
                         color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="carto-positron",
                         zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.8,
                         custom_data=['Hover_Text'],
@@ -463,7 +423,7 @@ if not df_raw.empty:
                         geojson=geojson,
                         locations=df_other['Регион'],
                         z=[1] * len(df_other),
-                        featureidkey=f'properties.{name_key}',
+                        featureidkey='properties.name',
                         colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']],
                         showscale=False,
                         marker_opacity=0.4,
@@ -480,7 +440,7 @@ if not df_raw.empty:
                         geojson=geojson,
                         locations=df_zero_selected['Регион'],
                         z=[1] * len(df_zero_selected),
-                        featureidkey=f'properties.{name_key}',
+                        featureidkey='properties.name',
                         colorscale=[[0, 'gray'], [1, 'gray']],
                         showscale=False,
                         marker_opacity=0.6,
