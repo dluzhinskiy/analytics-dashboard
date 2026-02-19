@@ -181,8 +181,7 @@ def get_crown_employees(df):
 
 
 def get_load_type_filters(prefix, show_low_option=False):
-    st.write("##### Фильтр типов нагрузки:")
-
+    # Заголовок удален для чистоты интерфейса
     if show_low_option:
         c1, c2, c3, c4 = st.columns(4)
         show_low = c4.toggle("Показать уволенных (⚠️)", value=False, key=f"{prefix}_low")
@@ -258,7 +257,7 @@ if not df_raw.empty:
 
 
     # 4. Отрисовываем Мастер-кнопку
-    st.sidebar.toggle("✅ **Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
+    st.sidebar.toggle("**Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
     st.sidebar.divider()
 
     # 5. Отрисовываем индивидуальные переключатели
@@ -368,7 +367,7 @@ if not df_raw.empty:
                 st.info("Нет данных по выбранным фильтрам.")
 
     elif selected_tab == "📈 Тренды":
-        st.header("Динамика и Тренды")
+        st.header("Динамика")
 
         sel_types_trend, _ = get_load_type_filters("trend")
 
