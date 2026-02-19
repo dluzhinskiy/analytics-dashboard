@@ -21,25 +21,26 @@ st.markdown(
     div[role="radiogroup"] {
         flex-direction: row;
         gap: 5px;
-        border-bottom: 2px solid #e6e6e6;
+        border-bottom: 2px solid rgba(150, 150, 150, 0.3);
         padding-bottom: 0 !important;
     }
 
-    /* 3. Стилизуем сами элементы как корешки */
+    /* 3. Стилизуем сами элементы как корешки с АДАПТИВНЫМИ цветами */
     div[role="radiogroup"] > label {
-        background-color: #f8f9fa;
+        background-color: var(--secondary-background-color); 
+        color: var(--text-color); 
         padding: 10px 20px;
         border-radius: 8px 8px 0 0;
-        border: 1px solid #e6e6e6;
+        border: 1px solid rgba(150, 150, 150, 0.3);
         border-bottom: none;
-        margin-bottom: -2px; /* Наложение на нижнюю линию */
+        margin-bottom: -2px; 
         cursor: pointer;
         transition: all 0.2s ease-in-out;
     }
 
-    /* 4. Эффект при наведении */
+    /* 4. Эффект при наведении (работает в обеих темах) */
     div[role="radiogroup"] > label:hover {
-        background-color: #e9ecef;
+        filter: brightness(0.85); 
     }
 
     /* 5. Убираем лишние отступы у текста */
@@ -215,7 +216,8 @@ if not df_raw.empty:
         "Навигация:",
         ["👥 Сотрудники", "🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"],
         horizontal=True,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="nav_radio"  # Ключ нужен для связи с колбэком
     )
 
     # --- ДИНАМИЧЕСКАЯ БОКОВАЯ ПАНЕЛЬ ---
@@ -226,6 +228,40 @@ if not df_raw.empty:
 
     st.sidebar.subheader("Юридические Центры")
     all_yuc = sorted(df['ЮЦ'].unique())
+
+    # 1. Проверяем, включены ли абсолютно ВСЕ индивидуальные ЮЦ (для умного статуса Мастер-кнопки)
+    all_selected = True
+    for i, yc in enumerate(all_yuc):
+        yc_key = f"sidebar_yuc_{selected_tab}_{yc}"
+        if yc_key in st.session_state:
+            if not st.session_state[yc_key]:
+                all_selected = False
+                break
+        else:
+            default_yuc_val = True if selected_tab in ["🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"] else (i == 0)
+            if not default_yuc_val:
+                all_selected = False
+                break
+
+    # 2. Назначаем Мастер-кнопке правильное состояние
+    master_key = f"master_yuc_{selected_tab}"
+    st.session_state[master_key] = all_selected
+
+
+    # 3. Функция, которая срабатывает при клике на Мастер-кнопку
+    def toggle_all_yuc_callback():
+        current_tab = st.session_state.nav_radio
+        m_key = f"master_yuc_{current_tab}"
+        master_val = st.session_state[m_key]
+        for yc_name in all_yuc:
+            st.session_state[f"sidebar_yuc_{current_tab}_{yc_name}"] = master_val
+
+
+    # 4. Отрисовываем Мастер-кнопку
+    st.sidebar.toggle("✅ **Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
+    st.sidebar.divider()
+
+    # 5. Отрисовываем индивидуальные переключатели
     selected_yuc = []
     for i, yc in enumerate(all_yuc):
         if selected_tab in ["🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"]:
@@ -344,7 +380,7 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                # --- ИЗМЕНЕНО: Группировка теперь по ЮЦ ---
+                # Группировка по Юридическим Центрам для построения 6 линий
                 df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
                 unique_years = df_grp['Год'].unique()
 
@@ -352,7 +388,7 @@ if not df_raw.empty:
                     total_sum = df_grp['Value'].sum()
                     year_val = unique_years[0]
                     fig = px.pie(
-                        df_grp, names='ЮЦ', values='Value', color='ЮЦ',  # ИЗМЕНЕНО: ЮЦ вместо Тип
+                        df_grp, names='ЮЦ', values='Value', color='ЮЦ',
                         hole=0.5,
                         title=f"Структура нагрузки по ЮЦ за {year_val} год"
                     )
@@ -362,7 +398,6 @@ if not df_raw.empty:
                                           showarrow=False)]
                     )
                 else:
-                    # ИЗМЕНЕНО: Линейный график строится по ЮЦ
                     fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
                     fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
 
@@ -448,8 +483,8 @@ if not df_raw.empty:
                     )
                     fig_map.update_traces(
                         hovertemplate="%{customdata[0]}<extra></extra>",
-                        marker_line_width=0.5,
-                        marker_line_color='white'
+                        marker_line_width=0.3,
+                        marker_line_color='#555555'
                     )
                 else:
                     fig_map = go.Figure(go.Choroplethmapbox(
@@ -469,8 +504,8 @@ if not df_raw.empty:
                         colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']],
                         showscale=False,
                         marker_opacity=0.4,
-                        marker_line_width=0.5,
-                        marker_line_color='white',
+                        marker_line_width=0.3,
+                        marker_line_color='#555555',
                         name='Другие ЮЦ',
                         customdata=df_other[['Hover_Text']],
                         hovertemplate="%{customdata[0]}<extra></extra>"
@@ -486,19 +521,19 @@ if not df_raw.empty:
                         colorscale=[[0, 'gray'], [1, 'gray']],
                         showscale=False,
                         marker_opacity=0.6,
-                        marker_line_width=0.5,
-                        marker_line_color='white',
+                        marker_line_width=0.3,
+                        marker_line_color='#555555',
                         name='Нет юриста',
                         customdata=df_zero_selected[['Hover_Text']],
                         hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
-                # Жесткая фиксация камеры
+                # Надежная центровка камеры карты
                 fig_map.update_layout(
                     margin={"r": 0, "t": 0, "l": 0, "b": 0},
                     height=800,
-                    mapbox_zoom=2.2,  # Приближение (зум)
-                    mapbox_center={"lat": 65, "lon": 100}  # Центр над Сибирью
+                    mapbox_zoom=2.2,
+                    mapbox_center={"lat": 65, "lon": 100}
                 )
 
                 st.plotly_chart(fig_map, use_container_width=True)
