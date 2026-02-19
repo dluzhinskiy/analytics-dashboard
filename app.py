@@ -6,17 +6,60 @@ import json
 import os
 
 # --- Настройка страницы ---
-st.set_page_config(page_title="Аналитика ЮЦ", layout="wide")
-st.title("📊 Дэшборд аналитики сотрудников и ЮЦ")
+st.set_page_config(page_title="Аналитика ЮЦ", layout="wide", initial_sidebar_state="expanded")
+
+# --- МАГИЯ CSS: Превращаем радио-кнопки во вкладки (корешки папок) ---
+st.markdown(
+    """
+    <style>
+    /* 1. Прячем стандартные кружочки радио-кнопок */
+    div[role="radiogroup"] > label > div:first-child {
+        display: none !important;
+    }
+
+    /* 2. Настраиваем контейнер (рисуем линию снизу) */
+    div[role="radiogroup"] {
+        flex-direction: row;
+        gap: 5px;
+        border-bottom: 2px solid #e6e6e6;
+        padding-bottom: 0 !important;
+    }
+
+    /* 3. Стилизуем сами элементы как корешки */
+    div[role="radiogroup"] > label {
+        background-color: #f8f9fa;
+        padding: 10px 20px;
+        border-radius: 8px 8px 0 0;
+        border: 1px solid #e6e6e6;
+        border-bottom: none;
+        margin-bottom: -2px; /* Наложение на нижнюю линию */
+        cursor: pointer;
+        transition: all 0.2s ease-in-out;
+    }
+
+    /* 4. Эффект при наведении */
+    div[role="radiogroup"] > label:hover {
+        background-color: #e9ecef;
+    }
+
+    /* 5. Убираем лишние отступы у текста */
+    div[role="radiogroup"] > label p {
+        margin: 0;
+        font-weight: 600;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- Глобальная палитра цветов ---
 COLORS_MAP = {
-    'Судебные дела': '#636EFA',  # Синий
-    'Претензии': '#EF553B',  # Красный
-    'Административные дела': '#00CC96',  # Зеленый
-    'Судебные дела (мало)': '#A0A0A0',  # Серый
-    'Претензии (мало)': '#B0B0B0',  # Светло-серый
-    'Административные дела (мало)': '#808080'  # Темно-серый
+    'Судебные дела': '#636EFA',
+    'Претензии': '#EF553B',
+    'Административные дела': '#00CC96',
+    'Судебные дела (мало)': '#A0A0A0',
+    'Претензии (мало)': '#B0B0B0',
+    'Административные дела (мало)': '#808080'
 }
 
 
@@ -31,7 +74,6 @@ def load_data():
         xls = pd.ExcelFile(file_path)
         df_stats = pd.read_excel(xls, sheet_name=0)
 
-        # Читаем Лист 2 (Справочник ЮЦ)
         if len(xls.sheet_names) > 1:
             df_mapping_raw = pd.read_excel(xls, sheet_name=1)
             reg_col, yuc_col = None, None
@@ -137,12 +179,11 @@ def get_crown_employees(df):
     return set()
 
 
-# --- Единая функция для отрисовки фильтров нагрузки ---
 def get_load_type_filters(prefix, show_low_option=False):
     st.write("##### Фильтр типов нагрузки:")
 
     if show_low_option:
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+        c1, c2, c3, c4 = st.columns(4)
         show_low = c4.toggle("Показать уволенных (⚠️)", value=False, key=f"{prefix}_low")
     else:
         c1, c2, c3 = st.columns(3)
@@ -169,31 +210,52 @@ if not df_raw.empty:
     low_activity_set = identify_low_activity(df)
     crown_employees_set = get_crown_employees(df_raw)
 
-    # --- SIDEBAR ---
+    # --- ИНТЕЛЛЕКТУАЛЬНАЯ НАВИГАЦИЯ ---
+    selected_tab = st.radio(
+        "Навигация:",
+        ["👥 Сотрудники", "🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+    # --- ДИНАМИЧЕСКАЯ БОКОВАЯ ПАНЕЛЬ ---
+    # Главный заголовок перенесен сюда
+    st.sidebar.title("📊 Дэшборд аналитики сотрудников и ЮЦ")
+    st.sidebar.divider()
+
     st.sidebar.header("Фильтры")
 
     st.sidebar.subheader("Юридические Центры")
     all_yuc = sorted(df['ЮЦ'].unique())
     selected_yuc = []
-    for yc in all_yuc:
-        is_checked = (yc == "Дальний Восток")
-        if st.sidebar.checkbox(yc, value=is_checked, key=f"check_{yc}"):
+    for i, yc in enumerate(all_yuc):
+        if selected_tab in ["🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"]:
+            default_yuc_val = True
+        else:
+            default_yuc_val = (i == 0)
+
+        if st.sidebar.toggle(yc, value=default_yuc_val, key=f"sidebar_yuc_{selected_tab}_{yc}"):
             selected_yuc.append(yc)
+
     df_filtered_by_yuc = df[df['ЮЦ'].isin(selected_yuc)]
 
     st.sidebar.subheader("Годы")
     all_years = sorted(df['Год'].unique())
     selected_years = []
     for year in all_years:
-        if st.sidebar.checkbox(str(year), value=True, key=f"year_{year}"):
-            selected_years.append(year)
+        if selected_tab == "📈 Тренды":
+            if st.sidebar.toggle(str(year), value=True, disabled=True, key=f"sidebar_year_{selected_tab}_{year}"):
+                selected_years.append(year)
+        else:
+            default_year_val = (year == 2025)
+            if st.sidebar.toggle(str(year), value=default_year_val, key=f"sidebar_year_{selected_tab}_{year}"):
+                selected_years.append(year)
+
     df_main = df_filtered_by_yuc[df_filtered_by_yuc['Год'].isin(selected_years)].copy()
 
-    # --- TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["👥 Сотрудники", "🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"])
+    # --- РЕНДЕР ВЫБРАННОГО РАЗДЕЛА ---
 
-    # --- TAB 1: Сотрудники ---
-    with tab1:
+    if selected_tab == "👥 Сотрудники":
         st.header("Сравнение сотрудников")
         st.info("ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе")
 
@@ -252,8 +314,7 @@ if not df_raw.empty:
 
                     st.plotly_chart(fig, use_container_width=True)
 
-    # --- TAB 2: ЮЦ ---
-    with tab2:
+    elif selected_tab == "🏢 ЮЦ":
         st.header("Сравнение Юридических Центров")
 
         sel_types_yuc, _ = get_load_type_filters("yuc")
@@ -271,11 +332,8 @@ if not df_raw.empty:
             else:
                 st.info("Нет данных по выбранным фильтрам.")
 
-    # --- TAB 3: Тренды ---
-    with tab3:
+    elif selected_tab == "📈 Тренды":
         st.header("Динамика и Тренды")
-        trend_mode = st.radio("Что сравниваем?", ["Типы нагрузки (Структура)", "Юридические Центры (Сравнение)"],
-                              horizontal=True)
 
         sel_types_trend, _ = get_load_type_filters("trend")
 
@@ -287,43 +345,29 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                if trend_mode == "Типы нагрузки (Структура)":
-                    df_grp = df_trend_filtered.groupby(['Год', 'Тип'])['Value'].sum().reset_index()
-                    unique_years = df_grp['Год'].unique()
+                df_grp = df_trend_filtered.groupby(['Год', 'Тип'])['Value'].sum().reset_index()
+                unique_years = df_grp['Год'].unique()
 
-                    if len(unique_years) == 1:
-                        total_sum = df_grp['Value'].sum()
-                        year_val = unique_years[0]
-                        fig = px.pie(
-                            df_grp, names='Тип', values='Value', color='Тип',
-                            color_discrete_map=COLORS_MAP, hole=0.5,
-                            title=f"Структура нагрузки за {year_val} год"
-                        )
-                        fig.update_traces(textposition='inside', textinfo='percent+value')
-                        fig.update_layout(
-                            annotations=[dict(text=f"<b>Всего:</b><br>{int(total_sum)}", x=0.5, y=0.5, font_size=20,
-                                              showarrow=False)]
-                        )
-                    else:
-                        fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True,
-                                      color_discrete_map=COLORS_MAP)
-                        fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
+                if len(unique_years) == 1:
+                    total_sum = df_grp['Value'].sum()
+                    year_val = unique_years[0]
+                    fig = px.pie(
+                        df_grp, names='Тип', values='Value', color='Тип',
+                        color_discrete_map=COLORS_MAP, hole=0.5,
+                        title=f"Структура нагрузки за {year_val} год"
+                    )
+                    fig.update_traces(textposition='inside', textinfo='percent+value')
+                    fig.update_layout(
+                        annotations=[dict(text=f"<b>Всего:</b><br>{int(total_sum)}", x=0.5, y=0.5, font_size=20,
+                                          showarrow=False)]
+                    )
                 else:
-                    df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
-                    unique_years = df_grp['Год'].unique()
-
-                    if len(unique_years) == 1:
-                        fig = px.bar(df_grp, x='ЮЦ', y='Value', color='ЮЦ', text_auto=True,
-                                     title=f"Сравнение ЮЦ за {unique_years[0]} год")
-                    else:
-                        fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
-                        fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
+                    fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True, color_discrete_map=COLORS_MAP)
+                    fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
 
                 st.plotly_chart(fig, use_container_width=True)
 
-    # --- TAB 4: КАРТА ---
-    with tab4:
-        st.header("🗺️ Карта нагрузки (2025)")
+    elif selected_tab == "🗺️ Тепловая карта":
         geojson = load_geojson()
 
         if 'Регион' not in df.columns:
@@ -336,19 +380,18 @@ if not df_raw.empty:
             if not sel_types_map:
                 st.warning("⚠️ Выберите хотя бы один тип нагрузки, чтобы увидеть данные на карте.")
             else:
-                df_2025 = df[df['Год'] == 2025]
+                df_map_filtered = df[df['Год'].isin(selected_years)]
 
-                if df_2025.empty:
+                if df_map_filtered.empty:
                     df_pivot = pd.DataFrame(columns=['Регион', 'Судебные дела', 'Административные дела', 'Претензии'])
                 else:
-                    df_pivot = df_2025.pivot_table(index='Регион', columns='Тип', values='Value', aggfunc='sum').fillna(
-                        0).reset_index()
+                    df_pivot = df_map_filtered.pivot_table(index='Регион', columns='Тип', values='Value',
+                                                           aggfunc='sum').fillna(0).reset_index()
 
                 for col in ['Судебные дела', 'Административные дела', 'Претензии']:
                     if col not in df_pivot.columns:
                         df_pivot[col] = 0
 
-                # Оптимизированное получение регионов
                 all_map_regs = [f['properties']['name'] for f in geojson['features']]
                 df_full = pd.DataFrame({'Регион': all_map_regs})
 
@@ -451,5 +494,9 @@ if not df_raw.empty:
                         hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
-                fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+                fig_map.update_layout(
+                    margin={"r": 0, "t": 0, "l": 0, "b": 0},
+                    height=700
+                )
+
                 st.plotly_chart(fig_map, use_container_width=True)
