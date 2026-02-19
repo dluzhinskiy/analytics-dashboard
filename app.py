@@ -344,16 +344,17 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                df_grp = df_trend_filtered.groupby(['Год', 'Тип'])['Value'].sum().reset_index()
+                # --- ИЗМЕНЕНО: Группировка теперь по ЮЦ ---
+                df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
                 unique_years = df_grp['Год'].unique()
 
                 if len(unique_years) == 1:
                     total_sum = df_grp['Value'].sum()
                     year_val = unique_years[0]
                     fig = px.pie(
-                        df_grp, names='Тип', values='Value', color='Тип',
-                        color_discrete_map=COLORS_MAP, hole=0.5,
-                        title=f"Структура нагрузки за {year_val} год"
+                        df_grp, names='ЮЦ', values='Value', color='ЮЦ',  # ИЗМЕНЕНО: ЮЦ вместо Тип
+                        hole=0.5,
+                        title=f"Структура нагрузки по ЮЦ за {year_val} год"
                     )
                     fig.update_traces(textposition='inside', textinfo='percent+value')
                     fig.update_layout(
@@ -361,7 +362,8 @@ if not df_raw.empty:
                                           showarrow=False)]
                     )
                 else:
-                    fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True, color_discrete_map=COLORS_MAP)
+                    # ИЗМЕНЕНО: Линейный график строится по ЮЦ
+                    fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
                     fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -435,7 +437,7 @@ if not df_raw.empty:
                 df_zero_selected = df_plot[(df_plot['Value'] == 0) & is_selected_yuc]
                 df_other = df_plot[~is_selected_yuc]
 
-                # --- СЛОЙ 1: Выбранные активные (БЕЗ ЖЕСТКОГО ZOOM/CENTER) ---
+                # --- СЛОЙ 1: Выбранные активные ---
                 if not df_active_selected.empty:
                     fig_map = px.choropleth_mapbox(
                         df_active_selected, geojson=geojson, locations='Регион', featureidkey='properties.name',
