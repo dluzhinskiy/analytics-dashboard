@@ -176,7 +176,7 @@ if not df_raw.empty:
     df_main = df_filtered_by_yuc[df_filtered_by_yuc['Год'].isin(selected_years)].copy()
 
     # --- TABS ---
-    tab1, tab2, tab3, tab4 = st.tabs(["👥 Сотрудники", "🏢 По ЮЦ", "📈 Тренды", "🗺️ Карта РФ"])
+    tab1, tab2, tab3, tab4 = st.tabs(["👥 Сотрудники", "🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"])
 
     # --- TAB 1: Сотрудники ---
     with tab1:
