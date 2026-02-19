@@ -20,7 +20,7 @@ COLORS_MAP = {
 }
 
 
-# --- 1. Загрузка данных (С УМНЫМ ПОИСКОМ КОЛОНОК) ---
+# --- 1. Загрузка данных ---
 @st.cache_data
 def load_data():
     df_stats = pd.DataFrame()
@@ -31,11 +31,8 @@ def load_data():
         xls = pd.ExcelFile(file_path)
         df_stats = pd.read_excel(xls, sheet_name=0)
 
-        # Читаем Лист 2 (Справочник)
         if len(xls.sheet_names) > 1:
             df_mapping_raw = pd.read_excel(xls, sheet_name=1)
-
-            # Умный поиск колонок Региона и ЮЦ
             reg_col, yuc_col = None, None
             for col in df_mapping_raw.columns:
                 c_low = str(col).lower()
@@ -47,7 +44,6 @@ def load_data():
             if reg_col and yuc_col:
                 df_mapping = df_mapping_raw[[reg_col, yuc_col]].copy()
             elif len(df_mapping_raw.columns) >= 2:
-                # Если не нашли по заголовкам, пробуем угадать по данным
                 val = str(df_mapping_raw.iloc[0, 0])
                 if any(x in val for x in
                        ['Дальний Восток', 'Сибирь', 'Урал', 'Поволжье', 'Северо-Запад', 'Юг', 'Центр']):
@@ -57,7 +53,6 @@ def load_data():
 
             if not df_mapping.empty:
                 df_mapping.columns = ['Регион', 'ЮЦ']
-                # Срезаем лишние пробелы для идеального совпадения
                 df_mapping['Регион'] = df_mapping['Регион'].astype(str).str.strip()
                 df_mapping['ЮЦ'] = df_mapping['ЮЦ'].astype(str).str.strip()
 
@@ -67,7 +62,6 @@ def load_data():
         except:
             st.error(f"Ошибка загрузки данных: {e}")
 
-    # Очищаем данные от пробелов в основном листе
     if not df_stats.empty:
         if 'ЮЦ' in df_stats.columns:
             df_stats['ЮЦ'] = df_stats['ЮЦ'].astype(str).str.strip()
@@ -190,7 +184,8 @@ if not df_raw.empty:
         show_sd_emp = col_sw1.toggle("Судебные дела", value=True, key="emp_sd")
         show_ad_emp = col_sw2.toggle("Административные дела", value=True, key="emp_ad")
         show_pret_emp = col_sw3.toggle("Претензии", value=True, key="emp_pret")
-        show_low = col_sw4.toggle("Показать уволенных (⚠️)", value=True, key="emp_low")
+        # ИЗМЕНЕНИЕ 1: Выключено по умолчанию (value=False)
+        show_low = col_sw4.toggle("Показать уволенных (⚠️)", value=False, key="emp_low")
 
         selected_types_emp = []
         if show_sd_emp: selected_types_emp.append("Судебные дела")
@@ -310,14 +305,44 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
+                # ИЗМЕНЕНИЕ 2: Логика отрисовки бублика при 1 выбранном годе
                 if trend_mode == "Типы нагрузки (Структура)":
                     df_grp = df_trend_filtered.groupby(['Год', 'Тип'])['Value'].sum().reset_index()
-                    fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True, color_discrete_map=COLORS_MAP)
+                    unique_years = df_grp['Год'].unique()
+
+                    if len(unique_years) == 1:
+                        # Рисуем Бублик (Donut Chart)
+                        total_sum = df_grp['Value'].sum()
+                        year_val = unique_years[0]
+                        fig = px.pie(
+                            df_grp, names='Тип', values='Value', color='Тип',
+                            color_discrete_map=COLORS_MAP, hole=0.5,
+                            title=f"Структура нагрузки за {year_val} год"
+                        )
+                        # Добавляем сумму внутрь
+                        fig.update_traces(textposition='inside', textinfo='percent+value')
+                        fig.update_layout(
+                            annotations=[dict(text=f"<b>Всего:</b><br>{int(total_sum)}", x=0.5, y=0.5, font_size=20,
+                                              showarrow=False)]
+                        )
+                    else:
+                        # Рисуем Линейный график
+                        fig = px.line(df_grp, x='Год', y='Value', color='Тип', markers=True,
+                                      color_discrete_map=COLORS_MAP)
+                        fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
                 else:
                     df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
-                    fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
+                    unique_years = df_grp['Год'].unique()
 
-                fig.update_layout(xaxis=dict(tickmode='linear', tick0=2023, dtick=1))
+                    if len(unique_years) == 1:
+                        # Рисуем гистограмму, так как линия из 1 точки неинформативна
+                        fig = px.bar(df_grp, x='ЮЦ', y='Value', color='ЮЦ', text_auto=True,
+                                     title=f"Сравнение ЮЦ за {unique_years[0]} год")
+                    else:
+                        # Рисуем Линейный график
+                        fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
+                        fig.update_layout(xaxis=dict(tickmode='linear', tick0=min(unique_years), dtick=1))
+
                 st.plotly_chart(fig, use_container_width=True)
 
     # --- TAB 4: КАРТА ---
@@ -348,7 +373,6 @@ if not df_raw.empty:
             else:
                 df_2025 = df[df['Год'] == 2025]
 
-                # Создаем сводную таблицу (pivot)
                 if df_2025.empty:
                     df_pivot = pd.DataFrame(columns=['Регион', 'Судебные дела', 'Административные дела', 'Претензии'])
                 else:
@@ -359,7 +383,6 @@ if not df_raw.empty:
                     if col not in df_pivot.columns:
                         df_pivot[col] = 0
 
-                # Получаем список всех регионов из карты
                 name_key = 'name'
                 if geojson.get('features') and 'name' not in geojson['features'][0]['properties']:
                     props = geojson['features'][0]['properties']
@@ -372,7 +395,6 @@ if not df_raw.empty:
                 df_plot = pd.merge(df_full, df_pivot, on='Регион', how='left').fillna(0)
                 df_plot['Value'] = df_plot[sel_types_map].sum(axis=1)
 
-                # --- Формирование детального текста для подсказки (HTML) ---
                 hover_texts = []
                 for _, row in df_plot.iterrows():
                     if row['Value'] == 0:
@@ -386,11 +408,7 @@ if not df_raw.empty:
 
                 df_plot['Hover_Text'] = hover_texts
 
-                # --- ИНТЕЛЛЕКТУАЛЬНАЯ ПРИВЯЗКА РЕГИОНОВ К ЮЦ ---
-                # Создаем справочник Регион -> ЮЦ для идеального маппинга
                 region_to_yuc = {}
-
-                # Шаг 1: Берем привязку из Листа 2
                 if not df_map_ref.empty:
                     for _, row in df_map_ref.iterrows():
                         reg = str(row['Регион']).strip()
@@ -398,7 +416,6 @@ if not df_raw.empty:
                         if reg and yuc and reg != 'nan':
                             region_to_yuc[reg] = yuc
 
-                # Шаг 2: Дополняем из Листа 1, если в справочнике кого-то не хватает
                 if 'Регион' in df.columns:
                     for _, row in df.iterrows():
                         reg = str(row['Регион']).strip()
@@ -406,33 +423,30 @@ if not df_raw.empty:
                         if reg and yuc and reg != 'nan' and reg not in region_to_yuc:
                             region_to_yuc[reg] = yuc
 
-                # Применяем справочник к карте
                 df_plot['Регион_чистый'] = df_plot['Регион'].astype(str).str.strip()
                 df_plot['ЮЦ_карты'] = df_plot['Регион_чистый'].map(region_to_yuc)
 
-                # Проверяем, выбран ли ЮЦ в боковом фильтре
                 selected_yuc_clean = [y.strip() for y in selected_yuc]
                 is_selected_yuc = df_plot['ЮЦ_карты'].isin(selected_yuc_clean)
 
-                # --- РАЗБИВКА НА 3 СЛОЯ ---
-                # 1. Выбранный ЮЦ + есть нагрузка (Тепловая шкала)
                 df_active_selected = df_plot[(df_plot['Value'] > 0) & is_selected_yuc]
-                # 2. Выбранный ЮЦ + НЕТ нагрузки (Серые, "нет юриста")
                 df_zero_selected = df_plot[(df_plot['Value'] == 0) & is_selected_yuc]
-                # 3. Не выбранные ЮЦ (Светло-синий фон с данными)
                 df_other = df_plot[~is_selected_yuc]
 
-                # --- ОТРИСОВКА СЛОЕВ ---
-                # СЛОЙ 1: Тепловая шкала
+                # --- СЛОЙ 1: Выбранные активные ---
                 if not df_active_selected.empty:
                     fig_map = px.choropleth_mapbox(
                         df_active_selected, geojson=geojson, locations='Регион', featureidkey=f'properties.{name_key}',
                         color='Value', color_continuous_scale="RdYlGn_r", mapbox_style="carto-positron",
-                        zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.6,
+                        zoom=2.5, center={"lat": 60, "lon": 95}, opacity=0.8,
                         custom_data=['Hover_Text'],
                         labels={'Value': 'Нагрузка'}
                     )
-                    fig_map.update_traces(hovertemplate="%{customdata[0]}<extra></extra>")
+                    fig_map.update_traces(
+                        hovertemplate="%{customdata[0]}<extra></extra>",
+                        marker_line_width=0.5,
+                        marker_line_color='white'
+                    )
                 else:
                     fig_map = go.Figure(go.Choroplethmapbox(
                         geojson=geojson, locations=[], z=[]
@@ -443,23 +457,24 @@ if not df_raw.empty:
                         mapbox_center={"lat": 60, "lon": 95}
                     )
 
-                # СЛОЙ 2: Другие ЮЦ (Светло-синий фон)
+                # --- СЛОЙ 2: Другие ЮЦ (Фоновые) ---
                 if not df_other.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
                         geojson=geojson,
                         locations=df_other['Регион'],
                         z=[1] * len(df_other),
                         featureidkey=f'properties.{name_key}',
-                        colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']],  # LightSteelBlue
+                        colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']],
                         showscale=False,
-                        marker_opacity=0.6,
+                        marker_opacity=0.4,
                         marker_line_width=0.5,
+                        marker_line_color='white',
                         name='Другие ЮЦ',
                         customdata=df_other[['Hover_Text']],
                         hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
-                # СЛОЙ 3: Выбранные ЮЦ без нагрузки (Серый цвет)
+                # --- СЛОЙ 3: Выбранные пустые (Серые) ---
                 if not df_zero_selected.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
                         geojson=geojson,
@@ -468,8 +483,9 @@ if not df_raw.empty:
                         featureidkey=f'properties.{name_key}',
                         colorscale=[[0, 'gray'], [1, 'gray']],
                         showscale=False,
-                        marker_opacity=0.4,
+                        marker_opacity=0.6,
                         marker_line_width=0.5,
+                        marker_line_color='white',
                         name='Нет юриста',
                         customdata=df_zero_selected[['Hover_Text']],
                         hovertemplate="%{customdata[0]}<extra></extra>"
