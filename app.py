@@ -186,7 +186,6 @@ def get_crown_employees(df):
 
 
 def get_load_type_filters(prefix, show_low_option=False):
-    # Заголовок удален
     if show_low_option:
         c1, c2, c3, c4 = st.columns(4)
         show_low = c4.toggle("Показать уволенных (⚠️)", value=False, key=f"{prefix}_low")
@@ -207,15 +206,12 @@ def get_load_type_filters(prefix, show_low_option=False):
     return selected, show_low
 
 
-# Функция для применения коэффициентов к данным
 def apply_coefficients(df_to_modify, use_coeffs, k_sd, k_ad, k_pr):
     if not use_coeffs:
         return df_to_modify
 
-    # Создаем копию, чтобы не менять исходный датафрейм
     df_mod = df_to_modify.copy()
 
-    # Применяем коэффициенты
     df_mod.loc[df_mod['Тип'] == 'Судебные дела', 'Value'] *= k_sd
     df_mod.loc[df_mod['Тип'] == 'Административные дела', 'Value'] *= k_ad
     df_mod.loc[df_mod['Тип'] == 'Претензии', 'Value'] *= k_pr
@@ -249,7 +245,6 @@ if not df_raw.empty:
     st.sidebar.subheader("Юридические Центры")
     all_yuc = sorted(df['ЮЦ'].unique())
 
-    # Логика мастер-кнопки
     all_selected = True
     for i, yc in enumerate(all_yuc):
         yc_key = f"sidebar_yuc_{selected_tab}_{yc}"
@@ -309,11 +304,8 @@ if not df_raw.empty:
     st.sidebar.subheader("Приведенные показатели")
     use_coeffs = st.sidebar.toggle("Включить коэффициенты пересчета", value=False, key="use_coeffs")
 
-    # Инициализация переменных коэффициентов
     k_sd, k_ad, k_pr = 1.0, 1.0, 1.0
 
-    # Верстка колонок: Название слева, ввод справа (с шагом 0.1 для стрелочек)
-    # ИЗМЕНЕНИЕ: Увеличиваем место для поля ввода ([1, 1.2]), чтобы кнопки отрисовались
     c_name_1, c_input_1 = st.sidebar.columns([1, 1.2])
     with c_name_1:
         st.markdown("**Судебные дела**")
@@ -369,25 +361,16 @@ if not df_raw.empty:
                 if df_sub.empty:
                     st.info("Нет данных.")
                 else:
-                    # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
                     df_sub = apply_coefficients(df_sub, use_coeffs, k_sd, k_ad, k_pr)
-
                     df_sub['Display'] = df_sub['Сотрудник'].map(emp_map)
 
                     chart_title = "Сравнительная гистограмма (с учетом коэффициентов)" if use_coeffs else "Сравнительная гистограмма нагрузки"
 
                     if use_coeffs:
-                        # ЕСЛИ КОЭФФИЦИЕНТЫ ВКЛЮЧЕНЫ: СУММИРУЕМ ВСЕ В ОДНУ КОЛОНКУ
                         grp = df_sub.groupby('Display')['Value'].sum().reset_index()
-
-                        fig = px.bar(grp, x='Display', y='Value',
-                                     text_auto='.1f',
-                                     title=chart_title)
-
-                        # Делаем единый цвет для всех
+                        fig = px.bar(grp, x='Display', y='Value', text_auto='.1f', title=chart_title)
                         fig.update_traces(marker_color='#636EFA')
                     else:
-                        # СТАНДАРТНЫЙ РЕЖИМ (ПО ЦВЕТАМ)
                         def cat_color(row):
                             suffix = " (мало)" if row['Сотрудник'] in low_activity_set else ""
                             return f"{row['Тип']}{suffix}"
@@ -399,7 +382,6 @@ if not df_raw.empty:
                         fig = px.bar(grp, x='Display', y='Value', color='Cat',
                                      color_discrete_map=COLORS_MAP, text_auto=True,
                                      title=chart_title)
-
                         new_names = {
                             'Судебные дела': 'Судебные дела',
                             'Претензии': 'Претензии',
@@ -421,20 +403,56 @@ if not df_raw.empty:
             st.warning("⚠️ Выберите хотя бы один тип нагрузки.")
         else:
             df_yuc_filtered = df_main[df_main['Тип'].isin(sel_types_yuc)].copy()
-
-            # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
             df_yuc_filtered = apply_coefficients(df_yuc_filtered, use_coeffs, k_sd, k_ad, k_pr)
 
             if use_coeffs:
-                # ЕСЛИ КОЭФФИЦИЕНТЫ ВКЛЮЧЕНЫ: СУММИРУЕМ ВСЕ ПО ЮЦ (ОДНА КОЛОНКА)
+                # --- ЛОГИКА С КОЭФФИЦИЕНТАМИ: ДВА ГРАФИКА РЯДОМ ---
                 grp_yu = df_yuc_filtered.groupby('ЮЦ')['Value'].sum().reset_index()
 
                 if not grp_yu.empty:
-                    fig_yu = px.bar(grp_yu, x='ЮЦ', y='Value',
-                                    text_auto='.1f', barmode='group')
-                    # Единый цвет
-                    fig_yu.update_traces(marker_color='#636EFA')
-                    st.plotly_chart(fig_yu, use_container_width=True)
+                    # Создаем две колонки для размещения графиков
+                    col_total, col_eff = st.columns(2)
+
+                    # 1. График ОБЩЕЙ нагрузки (СЛЕВА)
+                    with col_total:
+                        st.subheader("Общий объем")
+                        fig_total = px.bar(grp_yu, x='ЮЦ', y='Value',
+                                           text_auto='.1f', barmode='group')
+                        fig_total.update_traces(marker_color='#636EFA')  # Синий цвет
+                        st.plotly_chart(fig_total, use_container_width=True)
+
+                    # Подготовка данных для второго графика
+                    avg_data = []
+                    for index, row in grp_yu.iterrows():
+                        yc_name = row['ЮЦ']
+                        total_val = row['Value']
+
+                        employees_in_yc = df[df['ЮЦ'] == yc_name]['Сотрудник'].unique()
+                        active_count = 0
+                        for emp in employees_in_yc:
+                            if emp not in low_activity_set:
+                                active_count += 1
+
+                        ratio = total_val / active_count if active_count > 0 else 0
+                        avg_data.append(
+                            {'ЮЦ': yc_name, 'Средняя нагрузка': ratio, 'Активных сотрудников': active_count})
+
+                    df_avg = pd.DataFrame(avg_data)
+
+                    # 2. График СРЕДНЕЙ нагрузки (СПРАВА)
+                    with col_eff:
+                        st.subheader("Эффективность")
+                        # Формула удалена для выравнивания графиков
+
+                        fig_avg = px.bar(df_avg, x='ЮЦ', y='Средняя нагрузка',
+                                         text_auto='.1f',
+                                         hover_data=['Активных сотрудников'])
+
+                        # Оранжевый цвет для контраста
+                        fig_avg.update_traces(marker_color='#EF553B')
+
+                        st.plotly_chart(fig_avg, use_container_width=True)
+
                 else:
                     st.info("Нет данных по выбранным фильтрам.")
             else:
@@ -461,13 +479,9 @@ if not df_raw.empty:
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
                 df_trend_filtered = apply_coefficients(df_trend_filtered, use_coeffs, k_sd, k_ad, k_pr)
-
-                # Группировка по Юридическим Центрам
                 df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
                 unique_years = df_grp['Год'].unique()
-
                 title_suffix = " (с учетом коэффициентов)" if use_coeffs else ""
 
                 if len(unique_years) == 1:
@@ -479,9 +493,7 @@ if not df_raw.empty:
                         title=f"Структура нагрузки по ЮЦ за {year_val} год{title_suffix}"
                     )
                     fig.update_traces(textposition='inside', textinfo='percent+value')
-
                     fmt_sum = f"{total_sum:.1f}" if use_coeffs else f"{int(total_sum)}"
-
                     fig.update_layout(
                         annotations=[
                             dict(text=f"<b>Всего:</b><br>{fmt_sum}", x=0.5, y=0.5, font_size=20, showarrow=False)]
@@ -510,9 +522,7 @@ if not df_raw.empty:
                 if df_map_filtered.empty:
                     df_pivot = pd.DataFrame(columns=['Регион', 'Судебные дела', 'Административные дела', 'Претензии'])
                 else:
-                    # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ (перед созданием сводной таблицы)
                     df_map_filtered = apply_coefficients(df_map_filtered, use_coeffs, k_sd, k_ad, k_pr)
-
                     df_pivot = df_map_filtered.pivot_table(index='Регион', columns='Тип', values='Value',
                                                            aggfunc='sum').fillna(0).reset_index()
 
@@ -568,7 +578,6 @@ if not df_raw.empty:
                 df_zero_selected = df_plot[(df_plot['Value'] == 0) & is_selected_yuc]
                 df_other = df_plot[~is_selected_yuc]
 
-                # --- СЛОЙ 1: Выбранные активные ---
                 if not df_active_selected.empty:
                     fig_map = px.choropleth_mapbox(
                         df_active_selected, geojson=geojson, locations='Регион', featureidkey='properties.name',
@@ -577,59 +586,30 @@ if not df_raw.empty:
                         custom_data=['Hover_Text'],
                         labels={'Value': 'Нагрузка'}
                     )
-                    fig_map.update_traces(
-                        hovertemplate="%{customdata[0]}<extra></extra>",
-                        marker_line_width=0.3,
-                        marker_line_color='#555555'
-                    )
+                    fig_map.update_traces(hovertemplate="%{customdata[0]}<extra></extra>", marker_line_width=0.3,
+                                          marker_line_color='#555555')
                 else:
-                    fig_map = go.Figure(go.Choroplethmapbox(
-                        geojson=geojson, locations=[], z=[]
-                    ))
-                    fig_map.update_layout(
-                        mapbox_style="white-bg"
-                    )
+                    fig_map = go.Figure(go.Choroplethmapbox(geojson=geojson, locations=[], z=[]))
+                    fig_map.update_layout(mapbox_style="white-bg")
 
-                # --- СЛОЙ 2: Другие ЮЦ (Фоновые) ---
                 if not df_other.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
-                        geojson=geojson,
-                        locations=df_other['Регион'],
-                        z=[1] * len(df_other),
+                        geojson=geojson, locations=df_other['Регион'], z=[1] * len(df_other),
                         featureidkey='properties.name',
-                        colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']],
-                        showscale=False,
-                        marker_opacity=0.4,
-                        marker_line_width=0.3,
-                        marker_line_color='#555555',
-                        name='Другие ЮЦ',
-                        customdata=df_other[['Hover_Text']],
-                        hovertemplate="%{customdata[0]}<extra></extra>"
+                        colorscale=[[0, '#B0C4DE'], [1, '#B0C4DE']], showscale=False, marker_opacity=0.4,
+                        marker_line_width=0.3, marker_line_color='#555555', name='Другие ЮЦ',
+                        customdata=df_other[['Hover_Text']], hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
-                # --- СЛОЙ 3: Выбранные пустые (Серые) ---
                 if not df_zero_selected.empty:
                     fig_map.add_trace(go.Choroplethmapbox(
-                        geojson=geojson,
-                        locations=df_zero_selected['Регион'],
-                        z=[1] * len(df_zero_selected),
+                        geojson=geojson, locations=df_zero_selected['Регион'], z=[1] * len(df_zero_selected),
                         featureidkey='properties.name',
-                        colorscale=[[0, 'gray'], [1, 'gray']],
-                        showscale=False,
-                        marker_opacity=0.6,
-                        marker_line_width=0.3,
-                        marker_line_color='#555555',
-                        name='Нет юриста',
-                        customdata=df_zero_selected[['Hover_Text']],
-                        hovertemplate="%{customdata[0]}<extra></extra>"
+                        colorscale=[[0, 'gray'], [1, 'gray']], showscale=False, marker_opacity=0.6,
+                        marker_line_width=0.3, marker_line_color='#555555', name='Нет юриста',
+                        customdata=df_zero_selected[['Hover_Text']], hovertemplate="%{customdata[0]}<extra></extra>"
                     ))
 
-                # Надежная центровка камеры карты
-                fig_map.update_layout(
-                    margin={"r": 0, "t": 0, "l": 0, "b": 0},
-                    height=800,
-                    mapbox_zoom=2.2,
-                    mapbox_center={"lat": 65, "lon": 100}
-                )
-
+                fig_map.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=800, mapbox_zoom=2.2,
+                                      mapbox_center={"lat": 65, "lon": 100})
                 st.plotly_chart(fig_map, use_container_width=True)
