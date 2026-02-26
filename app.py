@@ -8,7 +8,7 @@ import os
 # --- Настройка страницы ---
 st.set_page_config(page_title="Аналитика ЮЦ", layout="wide", initial_sidebar_state="expanded")
 
-# --- МАГИЯ CSS: Превращаем радио-кнопки во вкладки (корешки папок) ---
+# --- МАГИЯ CSS: Превращаем радио-кнопки во вкладки и стилизуем поля ввода ---
 st.markdown(
     """
     <style>
@@ -17,7 +17,7 @@ st.markdown(
         display: none !important;
     }
 
-    /* 2. Настраиваем контейнер (рисуем линию снизу) */
+    /* 2. Настраиваем контейнер вкладок */
     div[role="radiogroup"] {
         flex-direction: row;
         gap: 5px;
@@ -25,7 +25,7 @@ st.markdown(
         padding-bottom: 0 !important;
     }
 
-    /* 3. Стилизуем сами элементы как корешки с АДАПТИВНЫМИ цветами */
+    /* 3. Стилизуем сами элементы как корешки */
     div[role="radiogroup"] > label {
         background-color: var(--secondary-background-color); 
         color: var(--text-color); 
@@ -38,15 +38,20 @@ st.markdown(
         transition: all 0.2s ease-in-out;
     }
 
-    /* 4. Эффект при наведении (работает в обеих темах) */
+    /* 4. Эффект при наведении */
     div[role="radiogroup"] > label:hover {
         filter: brightness(0.85); 
     }
 
-    /* 5. Убираем лишние отступы у текста */
+    /* 5. Убираем лишние отступы у текста вкладок */
     div[role="radiogroup"] > label p {
         margin: 0;
         font-weight: 600;
+    }
+
+    /* 6. Выравнивание текста в боковой панели напротив полей ввода */
+    .stNumberInput label {
+        display: none; /* Скрываем стандартные лейблы у полей ввода в сайдбаре */
     }
     </style>
     """,
@@ -181,7 +186,7 @@ def get_crown_employees(df):
 
 
 def get_load_type_filters(prefix, show_low_option=False):
-    # Заголовок удален для чистоты интерфейса
+    # Заголовок удален
     if show_low_option:
         c1, c2, c3, c4 = st.columns(4)
         show_low = c4.toggle("Показать уволенных (⚠️)", value=False, key=f"{prefix}_low")
@@ -202,6 +207,22 @@ def get_load_type_filters(prefix, show_low_option=False):
     return selected, show_low
 
 
+# Функция для применения коэффициентов к данным
+def apply_coefficients(df_to_modify, use_coeffs, k_sd, k_ad, k_pr):
+    if not use_coeffs:
+        return df_to_modify
+
+    # Создаем копию, чтобы не менять исходный датафрейм
+    df_mod = df_to_modify.copy()
+
+    # Применяем коэффициенты
+    df_mod.loc[df_mod['Тип'] == 'Судебные дела', 'Value'] *= k_sd
+    df_mod.loc[df_mod['Тип'] == 'Административные дела', 'Value'] *= k_ad
+    df_mod.loc[df_mod['Тип'] == 'Претензии', 'Value'] *= k_pr
+
+    return df_mod
+
+
 # --- START APP ---
 df_raw, df_map_ref = load_data()
 
@@ -216,7 +237,7 @@ if not df_raw.empty:
         ["👥 Сотрудники", "🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"],
         horizontal=True,
         label_visibility="collapsed",
-        key="nav_radio"  # Ключ нужен для связи с колбэком
+        key="nav_radio"
     )
 
     # --- ДИНАМИЧЕСКАЯ БОКОВАЯ ПАНЕЛЬ ---
@@ -228,7 +249,7 @@ if not df_raw.empty:
     st.sidebar.subheader("Юридические Центры")
     all_yuc = sorted(df['ЮЦ'].unique())
 
-    # 1. Проверяем, включены ли абсолютно ВСЕ индивидуальные ЮЦ (для умного статуса Мастер-кнопки)
+    # Логика мастер-кнопки
     all_selected = True
     for i, yc in enumerate(all_yuc):
         yc_key = f"sidebar_yuc_{selected_tab}_{yc}"
@@ -242,12 +263,10 @@ if not df_raw.empty:
                 all_selected = False
                 break
 
-    # 2. Назначаем Мастер-кнопке правильное состояние
     master_key = f"master_yuc_{selected_tab}"
     st.session_state[master_key] = all_selected
 
 
-    # 3. Функция, которая срабатывает при клике на Мастер-кнопку
     def toggle_all_yuc_callback():
         current_tab = st.session_state.nav_radio
         m_key = f"master_yuc_{current_tab}"
@@ -256,11 +275,9 @@ if not df_raw.empty:
             st.session_state[f"sidebar_yuc_{current_tab}_{yc_name}"] = master_val
 
 
-    # 4. Отрисовываем Мастер-кнопку
     st.sidebar.toggle("**Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
     st.sidebar.divider()
 
-    # 5. Отрисовываем индивидуальные переключатели
     selected_yuc = []
     for i, yc in enumerate(all_yuc):
         if selected_tab in ["🏢 ЮЦ", "📈 Тренды", "🗺️ Тепловая карта"]:
@@ -286,6 +303,37 @@ if not df_raw.empty:
                 selected_years.append(year)
 
     df_main = df_filtered_by_yuc[df_filtered_by_yuc['Год'].isin(selected_years)].copy()
+
+    # --- НОВЫЙ РАЗДЕЛ: ПРИВЕДЕННЫЕ ПОКАЗАТЕЛИ ---
+    st.sidebar.divider()
+    st.sidebar.subheader("Приведенные показатели")
+    use_coeffs = st.sidebar.toggle("Включить коэффициенты пересчета", value=False, key="use_coeffs")
+
+    # Инициализация переменных коэффициентов
+    k_sd, k_ad, k_pr = 1.0, 1.0, 1.0
+
+    # Верстка колонок: Название слева, ввод справа (с шагом 0.1 для стрелочек)
+    # ИЗМЕНЕНИЕ: Увеличиваем место для поля ввода ([1, 1.2]), чтобы кнопки отрисовались
+    c_name_1, c_input_1 = st.sidebar.columns([1, 1.2])
+    with c_name_1:
+        st.markdown("**Судебные дела**")
+    with c_input_1:
+        k_sd = st.number_input("SD", value=1.00, step=0.1, format="%.2f", disabled=not use_coeffs,
+                               label_visibility="collapsed", key="coeff_sd")
+
+    c_name_2, c_input_2 = st.sidebar.columns([1, 1.2])
+    with c_name_2:
+        st.markdown("**Админ. дела**")
+    with c_input_2:
+        k_ad = st.number_input("AD", value=1.00, step=0.1, format="%.2f", disabled=not use_coeffs,
+                               label_visibility="collapsed", key="coeff_ad")
+
+    c_name_3, c_input_3 = st.sidebar.columns([1, 1.2])
+    with c_name_3:
+        st.markdown("**Претензии**")
+    with c_input_3:
+        k_pr = st.number_input("PR", value=1.00, step=0.1, format="%.2f", disabled=not use_coeffs,
+                               label_visibility="collapsed", key="coeff_pr")
 
     # --- РЕНДЕР ВЫБРАННОГО РАЗДЕЛА ---
 
@@ -321,30 +369,46 @@ if not df_raw.empty:
                 if df_sub.empty:
                     st.info("Нет данных.")
                 else:
+                    # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
+                    df_sub = apply_coefficients(df_sub, use_coeffs, k_sd, k_ad, k_pr)
+
                     df_sub['Display'] = df_sub['Сотрудник'].map(emp_map)
 
+                    chart_title = "Сравнительная гистограмма (с учетом коэффициентов)" if use_coeffs else "Сравнительная гистограмма нагрузки"
 
-                    def cat_color(row):
-                        suffix = " (мало)" if row['Сотрудник'] in low_activity_set else ""
-                        return f"{row['Тип']}{suffix}"
+                    if use_coeffs:
+                        # ЕСЛИ КОЭФФИЦИЕНТЫ ВКЛЮЧЕНЫ: СУММИРУЕМ ВСЕ В ОДНУ КОЛОНКУ
+                        grp = df_sub.groupby('Display')['Value'].sum().reset_index()
+
+                        fig = px.bar(grp, x='Display', y='Value',
+                                     text_auto='.1f',
+                                     title=chart_title)
+
+                        # Делаем единый цвет для всех
+                        fig.update_traces(marker_color='#636EFA')
+                    else:
+                        # СТАНДАРТНЫЙ РЕЖИМ (ПО ЦВЕТАМ)
+                        def cat_color(row):
+                            suffix = " (мало)" if row['Сотрудник'] in low_activity_set else ""
+                            return f"{row['Тип']}{suffix}"
 
 
-                    df_sub['Cat'] = df_sub.apply(cat_color, axis=1)
-                    grp = df_sub.groupby(['Display', 'Cat'])['Value'].sum().reset_index()
+                        df_sub['Cat'] = df_sub.apply(cat_color, axis=1)
+                        grp = df_sub.groupby(['Display', 'Cat'])['Value'].sum().reset_index()
 
-                    fig = px.bar(grp, x='Display', y='Value', color='Cat',
-                                 color_discrete_map=COLORS_MAP, text_auto=True,
-                                 title="Сравнительная гистограмма нагрузки")
+                        fig = px.bar(grp, x='Display', y='Value', color='Cat',
+                                     color_discrete_map=COLORS_MAP, text_auto=True,
+                                     title=chart_title)
 
-                    new_names = {
-                        'Судебные дела': 'Судебные дела',
-                        'Претензии': 'Претензии',
-                        'Административные дела': 'Административные дела',
-                        'Судебные дела (мало)': 'Судебные дела (неактивен)',
-                        'Претензии (мало)': 'Претензии (неактивен)',
-                        'Административные дела (мало)': 'Административные дела (неактивен)'
-                    }
-                    fig.for_each_trace(lambda t: t.update(name=new_names.get(t.name, t.name)))
+                        new_names = {
+                            'Судебные дела': 'Судебные дела',
+                            'Претензии': 'Претензии',
+                            'Административные дела': 'Административные дела',
+                            'Судебные дела (мало)': 'Судебные дела (неактивен)',
+                            'Претензии (мало)': 'Претензии (неактивен)',
+                            'Административные дела (мало)': 'Административные дела (неактивен)'
+                        }
+                        fig.for_each_trace(lambda t: t.update(name=new_names.get(t.name, t.name)))
 
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -356,32 +420,55 @@ if not df_raw.empty:
         if not sel_types_yuc:
             st.warning("⚠️ Выберите хотя бы один тип нагрузки.")
         else:
-            df_yuc_filtered = df_main[df_main['Тип'].isin(sel_types_yuc)]
-            grp_yu = df_yuc_filtered.groupby(['ЮЦ', 'Тип'])['Value'].sum().reset_index()
+            df_yuc_filtered = df_main[df_main['Тип'].isin(sel_types_yuc)].copy()
 
-            if not grp_yu.empty:
-                fig_yu = px.bar(grp_yu, x='ЮЦ', y='Value', color='Тип',
-                                color_discrete_map=COLORS_MAP, barmode='group', text_auto=True)
-                st.plotly_chart(fig_yu, use_container_width=True)
+            # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
+            df_yuc_filtered = apply_coefficients(df_yuc_filtered, use_coeffs, k_sd, k_ad, k_pr)
+
+            if use_coeffs:
+                # ЕСЛИ КОЭФФИЦИЕНТЫ ВКЛЮЧЕНЫ: СУММИРУЕМ ВСЕ ПО ЮЦ (ОДНА КОЛОНКА)
+                grp_yu = df_yuc_filtered.groupby('ЮЦ')['Value'].sum().reset_index()
+
+                if not grp_yu.empty:
+                    fig_yu = px.bar(grp_yu, x='ЮЦ', y='Value',
+                                    text_auto='.1f', barmode='group')
+                    # Единый цвет
+                    fig_yu.update_traces(marker_color='#636EFA')
+                    st.plotly_chart(fig_yu, use_container_width=True)
+                else:
+                    st.info("Нет данных по выбранным фильтрам.")
             else:
-                st.info("Нет данных по выбранным фильтрам.")
+                # СТАНДАРТНЫЙ РЕЖИМ
+                grp_yu = df_yuc_filtered.groupby(['ЮЦ', 'Тип'])['Value'].sum().reset_index()
+
+                if not grp_yu.empty:
+                    fig_yu = px.bar(grp_yu, x='ЮЦ', y='Value', color='Тип',
+                                    color_discrete_map=COLORS_MAP, barmode='group', text_auto=True)
+                    st.plotly_chart(fig_yu, use_container_width=True)
+                else:
+                    st.info("Нет данных по выбранным фильтрам.")
 
     elif selected_tab == "📈 Тренды":
-        st.header("Динамика")
+        st.header("Динамика и Тренды")
 
         sel_types_trend, _ = get_load_type_filters("trend")
 
         if not sel_types_trend:
             st.warning("⚠️ Выберите хотя бы один тип нагрузки.")
         else:
-            df_trend_filtered = df_main[df_main['Тип'].isin(sel_types_trend)]
+            df_trend_filtered = df_main[df_main['Тип'].isin(sel_types_trend)].copy()
 
             if df_trend_filtered.empty:
                 st.info("Нет данных по выбранным фильтрам.")
             else:
-                # Группировка по Юридическим Центрам для построения 6 линий
+                # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ
+                df_trend_filtered = apply_coefficients(df_trend_filtered, use_coeffs, k_sd, k_ad, k_pr)
+
+                # Группировка по Юридическим Центрам
                 df_grp = df_trend_filtered.groupby(['Год', 'ЮЦ'])['Value'].sum().reset_index()
                 unique_years = df_grp['Год'].unique()
+
+                title_suffix = " (с учетом коэффициентов)" if use_coeffs else ""
 
                 if len(unique_years) == 1:
                     total_sum = df_grp['Value'].sum()
@@ -389,12 +476,15 @@ if not df_raw.empty:
                     fig = px.pie(
                         df_grp, names='ЮЦ', values='Value', color='ЮЦ',
                         hole=0.5,
-                        title=f"Структура нагрузки по ЮЦ за {year_val} год"
+                        title=f"Структура нагрузки по ЮЦ за {year_val} год{title_suffix}"
                     )
                     fig.update_traces(textposition='inside', textinfo='percent+value')
+
+                    fmt_sum = f"{total_sum:.1f}" if use_coeffs else f"{int(total_sum)}"
+
                     fig.update_layout(
-                        annotations=[dict(text=f"<b>Всего:</b><br>{int(total_sum)}", x=0.5, y=0.5, font_size=20,
-                                          showarrow=False)]
+                        annotations=[
+                            dict(text=f"<b>Всего:</b><br>{fmt_sum}", x=0.5, y=0.5, font_size=20, showarrow=False)]
                     )
                 else:
                     fig = px.line(df_grp, x='Год', y='Value', color='ЮЦ', markers=True)
@@ -415,11 +505,14 @@ if not df_raw.empty:
             if not sel_types_map:
                 st.warning("⚠️ Выберите хотя бы один тип нагрузки, чтобы увидеть данные на карте.")
             else:
-                df_map_filtered = df[df['Год'].isin(selected_years)]
+                df_map_filtered = df[df['Год'].isin(selected_years)].copy()
 
                 if df_map_filtered.empty:
                     df_pivot = pd.DataFrame(columns=['Регион', 'Судебные дела', 'Административные дела', 'Претензии'])
                 else:
+                    # ПРИМЕНЯЕМ КОЭФФИЦИЕНТЫ (перед созданием сводной таблицы)
+                    df_map_filtered = apply_coefficients(df_map_filtered, use_coeffs, k_sd, k_ad, k_pr)
+
                     df_pivot = df_map_filtered.pivot_table(index='Регион', columns='Тип', values='Value',
                                                            aggfunc='sum').fillna(0).reset_index()
 
@@ -440,8 +533,12 @@ if not df_raw.empty:
                     else:
                         lines = [f"<b>{row['Регион']}</b>"]
                         for t in sel_types_map:
-                            lines.append(f"{t}: {int(row[t])}")
-                        lines.append(f"Всего: {int(row['Value'])}")
+                            val_t = row[t]
+                            fmt_val = f"{val_t:.1f}" if use_coeffs else f"{int(val_t)}"
+                            lines.append(f"{t}: {fmt_val}")
+
+                        fmt_total = f"{row['Value']:.1f}" if use_coeffs else f"{int(row['Value'])}"
+                        lines.append(f"Всего: {fmt_total}")
                         hover_texts.append("<br>".join(lines))
 
                 df_plot['Hover_Text'] = hover_texts
