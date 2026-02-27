@@ -109,10 +109,10 @@ def load_data():
         st.error(f"❌ Ошибка загрузки файла '{file_path}': {e}")
 
     if not df_stats.empty:
-        if 'ЮЦ' in df_stats.columns:
-            df_stats['ЮЦ'] = df_stats['ЮЦ'].astype(str).str.strip()
-        if 'Регион' in df_stats.columns:
-            df_stats['Регион'] = df_stats['Регион'].astype(str).str.strip()
+        # ВАЖНО: Очищаем все ключевые текстовые поля от пробелов для корректного сравнения
+        for col in ['ЮЦ', 'Регион', 'Сотрудник']:
+            if col in df_stats.columns:
+                df_stats[col] = df_stats[col].astype(str).str.strip()
 
     return df_stats, df_mapping
 
@@ -158,17 +158,20 @@ def preprocess_stats(df):
     return df_melted.dropna(subset=['Год', 'Тип']).drop(columns=['Year_Metric'])
 
 
-def identify_low_activity(df, threshold=5):
-    df_2025 = df[df['Год'] == 2025]
-    if df_2025.empty: return set()
+def get_fired_employees(df):
+    target_col = None
+    # Ищем колонку, содержащую слово "уволен"
+    for col in df.columns:
+        if "уволен" in str(col).strip().lower():
+            target_col = col
+            break
 
-    activity_2025 = df_2025.groupby('Сотрудник')['Value'].sum()
-    low_activity_emps = activity_2025[activity_2025 <= threshold].index.tolist()
-
-    all_emps = df['Сотрудник'].unique()
-    emps_with_data = df_2025['Сотрудник'].unique()
-    no_data = list(set(all_emps) - set(emps_with_data))
-    return set(low_activity_emps + no_data)
+    if target_col:
+        # Ищем любой знак 'x', 'X', 'х', 'Х' (лат/кир)
+        mask = df[target_col].astype(str).str.contains(r'[xXхХ]', na=False)
+        # Возвращаем список сотрудников (уже очищенный в load_data)
+        return set(df[mask]['Сотрудник'].unique())
+    return set()
 
 
 def get_crown_employees(df):
@@ -224,7 +227,7 @@ df_raw, df_map_ref = load_data()
 
 if not df_raw.empty:
     df = preprocess_stats(df_raw)
-    low_activity_set = identify_low_activity(df)
+    low_activity_set = get_fired_employees(df_raw)
     crown_employees_set = get_crown_employees(df_raw)
 
     # --- ИНТЕЛЛЕКТУАЛЬНАЯ НАВИГАЦИЯ ---
@@ -270,7 +273,7 @@ if not df_raw.empty:
             st.session_state[f"sidebar_yuc_{current_tab}_{yc_name}"] = master_val
 
 
-    st.sidebar.toggle("**Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
+    st.sidebar.toggle("✅ **Включить / Выключить все**", key=master_key, on_change=toggle_all_yuc_callback)
     st.sidebar.divider()
 
     selected_yuc = []
@@ -331,7 +334,7 @@ if not df_raw.empty:
 
     if selected_tab == "👥 Сотрудники":
         st.header("Сравнение сотрудников")
-        st.info("ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе")
+        st.info("ℹ️ **Легенда статусов:** 👑 — Работник ЮЦ | ⚠️ — Сотрудник сейчас не работает в регионе (уволен)")
 
         selected_types_emp, show_low = get_load_type_filters("emp", show_low_option=True)
 
@@ -343,6 +346,7 @@ if not df_raw.empty:
             if n in low_activity_set: prefix += "⚠️ "
             emp_map[n] = prefix + n
 
+        # ФИЛЬТРАЦИЯ СПИСКА: Если галочка выключена, убираем уволенных
         opts = [emp_map[n] for n in raw_emps if show_low or n not in low_activity_set]
         sel_display = st.multiselect("Выберите сотрудников:", opts, default=opts)
 
@@ -366,9 +370,22 @@ if not df_raw.empty:
 
                     chart_title = "Сравнительная гистограмма (с учетом коэффициентов)" if use_coeffs else "Сравнительная гистограмма нагрузки"
 
+                    # --- ЛОГИКА СОРТИРОВКИ ДЛЯ ГРУППИРОВКИ ПО ЮЦ (БЕЗ МНОГОУРОВНЕВОЙ ОСИ) ---
+                    # 1. Группируем, чтобы получить сумму для каждого сотрудника
+                    emp_totals = df_sub.groupby(['Display', 'ЮЦ'])['Value'].sum().reset_index()
+
+                    # 2. Сортируем: сначала по ЮЦ (чтобы все из одного центра были рядом),
+                    #    затем по Значению (чтобы внутри центра была "лесенка")
+                    emp_totals = emp_totals.sort_values(by=['ЮЦ', 'Value'], ascending=[True, False])
+
+                    # 3. Получаем правильный порядок имен
+                    ordered_names = emp_totals['Display'].tolist()
+
                     if use_coeffs:
                         grp = df_sub.groupby('Display')['Value'].sum().reset_index()
-                        fig = px.bar(grp, x='Display', y='Value', text_auto='.1f', title=chart_title)
+                        fig = px.bar(grp, x='Display', y='Value',
+                                     text_auto='.1f',
+                                     title=chart_title)
                         fig.update_traces(marker_color='#636EFA')
                     else:
                         def cat_color(row):
@@ -382,6 +399,7 @@ if not df_raw.empty:
                         fig = px.bar(grp, x='Display', y='Value', color='Cat',
                                      color_discrete_map=COLORS_MAP, text_auto=True,
                                      title=chart_title)
+
                         new_names = {
                             'Судебные дела': 'Судебные дела',
                             'Претензии': 'Претензии',
@@ -391,6 +409,9 @@ if not df_raw.empty:
                             'Административные дела (мало)': 'Административные дела (неактивен)'
                         }
                         fig.for_each_trace(lambda t: t.update(name=new_names.get(t.name, t.name)))
+
+                    # 4. Применяем принудительный порядок оси X
+                    fig.update_xaxes(categoryorder='array', categoryarray=ordered_names)
 
                     st.plotly_chart(fig, use_container_width=True)
 
@@ -406,22 +427,18 @@ if not df_raw.empty:
             df_yuc_filtered = apply_coefficients(df_yuc_filtered, use_coeffs, k_sd, k_ad, k_pr)
 
             if use_coeffs:
-                # --- ЛОГИКА С КОЭФФИЦИЕНТАМИ: ДВА ГРАФИКА РЯДОМ ---
                 grp_yu = df_yuc_filtered.groupby('ЮЦ')['Value'].sum().reset_index()
 
                 if not grp_yu.empty:
-                    # Создаем две колонки для размещения графиков
                     col_total, col_eff = st.columns(2)
 
-                    # 1. График ОБЩЕЙ нагрузки (СЛЕВА)
                     with col_total:
-                        st.subheader("Общий объем")
+                        st.subheader("1. Общий объем")
                         fig_total = px.bar(grp_yu, x='ЮЦ', y='Value',
                                            text_auto='.1f', barmode='group')
-                        fig_total.update_traces(marker_color='#636EFA')  # Синий цвет
+                        fig_total.update_traces(marker_color='#636EFA')
                         st.plotly_chart(fig_total, use_container_width=True)
 
-                    # Подготовка данных для второго графика
                     avg_data = []
                     for index, row in grp_yu.iterrows():
                         yc_name = row['ЮЦ']
@@ -439,24 +456,18 @@ if not df_raw.empty:
 
                     df_avg = pd.DataFrame(avg_data)
 
-                    # 2. График СРЕДНЕЙ нагрузки (СПРАВА)
                     with col_eff:
-                        st.subheader("Эффективность")
-                        # Формула удалена для выравнивания графиков
+                        st.subheader("2. Эффективность")
 
                         fig_avg = px.bar(df_avg, x='ЮЦ', y='Средняя нагрузка',
                                          text_auto='.1f',
                                          hover_data=['Активных сотрудников'])
-
-                        # Оранжевый цвет для контраста
                         fig_avg.update_traces(marker_color='#EF553B')
-
                         st.plotly_chart(fig_avg, use_container_width=True)
 
                 else:
                     st.info("Нет данных по выбранным фильтрам.")
             else:
-                # СТАНДАРТНЫЙ РЕЖИМ
                 grp_yu = df_yuc_filtered.groupby(['ЮЦ', 'Тип'])['Value'].sum().reset_index()
 
                 if not grp_yu.empty:
