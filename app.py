@@ -9,6 +9,7 @@ import streamlit as st
 from config import AppConfig, TABS
 from data_loader import load_data, load_geojson, preprocess_stats, get_fired_employees, get_crown_employees
 from components import create_emp_map
+from help_texts import HELP_COEFFICIENTS
 from tabs import employees, yuc, heatmap, extra
 
 
@@ -71,7 +72,7 @@ def render_sidebar(df_all) -> AppConfig:
             st.session_state[f"yuc_{y}"] = new_val
 
     master_toggle = st.sidebar.toggle(
-        "**Включить / Выключить все**",
+        "✅ **Включить / Выключить все**",
         value=True,
         key="master_yuc",
         on_change=_on_master_change,
@@ -85,7 +86,13 @@ def render_sidebar(df_all) -> AppConfig:
 
     # --- Коэффициенты ---
     st.sidebar.divider()
-    st.sidebar.subheader("Приведенные показатели")
+    c_title, c_help = st.sidebar.columns([5, 1])
+    with c_title:
+        st.subheader("Приведенные показатели")
+    with c_help:
+        st.markdown("<div style='height: 0.3rem'></div>", unsafe_allow_html=True)
+        if st.button("❓", key="help_coeffs", help="Справка по коэффициентам"):
+            _show_coeffs_help()
     use_coeffs = st.sidebar.toggle("Включить коэффициенты", value=False)
 
     coefficients = _render_coefficient_inputs(use_coeffs)
@@ -134,6 +141,14 @@ def _render_coefficient_inputs(use_coeffs: bool) -> dict:
             )
 
     return result
+
+
+@st.dialog("📖 Приведённые показатели", width="large")
+def _show_coeffs_help() -> None:
+    """Модальное окно со справкой по коэффициентам."""
+    st.markdown(HELP_COEFFICIENTS)
+    if st.button("Закрыть", key="close_help_coeffs", use_container_width=True):
+        st.rerun()
 
 
 # ==========================================
