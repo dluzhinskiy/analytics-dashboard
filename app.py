@@ -4,11 +4,13 @@
 Точка входа: streamlit run app.py
 """
 
+import os
 import sys
-from pathlib import Path
 
-# Streamlit Cloud может не добавлять директорию скрипта в sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Гарантируем, что директория app.py в sys.path (для Streamlit Cloud)
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if _APP_DIR not in sys.path:
+    sys.path.insert(0, _APP_DIR)
 
 import streamlit as st
 
