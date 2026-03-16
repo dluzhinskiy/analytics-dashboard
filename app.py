@@ -24,13 +24,14 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    div[role="radiogroup"] > label > div:first-child { display: none !important; }
-    div[role="radiogroup"] {
+    /* Стилизация ТОЛЬКО навигационного radio (внутри .nav-tabs) */
+    .nav-tabs div[role="radiogroup"] > label > div:first-child { display: none !important; }
+    .nav-tabs div[role="radiogroup"] {
         flex-direction: row; gap: 5px;
         border-bottom: 2px solid rgba(150, 150, 150, 0.3);
         padding-bottom: 0 !important;
     }
-    div[role="radiogroup"] > label {
+    .nav-tabs div[role="radiogroup"] > label {
         background-color: var(--secondary-background-color);
         color: var(--text-color);
         padding: 10px 20px;
@@ -41,8 +42,8 @@ st.markdown(
         cursor: pointer;
         transition: all 0.2s ease-in-out;
     }
-    div[role="radiogroup"] > label:hover { filter: brightness(0.85); }
-    div[role="radiogroup"] > label p { margin: 0; font-weight: 600; }
+    .nav-tabs div[role="radiogroup"] > label:hover { filter: brightness(0.85); }
+    .nav-tabs div[role="radiogroup"] > label p { margin: 0; font-weight: 600; }
     .stNumberInput label { display: none; }
     </style>
     """,
@@ -70,7 +71,7 @@ def render_sidebar(df_all) -> AppConfig:
             st.session_state[f"yuc_{y}"] = new_val
 
     master_toggle = st.sidebar.toggle(
-        "✅ **Включить / Выключить все**",
+        "**Включить / Выключить все**",
         value=True,
         key="master_yuc",
         on_change=_on_master_change,
@@ -159,13 +160,16 @@ def main() -> None:
     # Маппинг сотрудников
     emp_map = create_emp_map(sorted(df_all["Сотрудник"].unique()), crown_emps)
 
-    # Навигация
+    # Навигация (обёрнута в div.nav-tabs для точечной CSS-стилизации)
+    st.markdown('<div class="nav-tabs">', unsafe_allow_html=True)
     selected_tab = st.radio(
         "Навигация:",
         TABS,
         horizontal=True,
         label_visibility="collapsed",
+        key="main_nav",
     )
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Сайдбар
     cfg = render_sidebar(df_all)
