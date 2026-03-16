@@ -31,27 +31,28 @@ def render(
         key="extra_sub_tab",
     )
 
-    # Фильтры с уникальными ключами, привязанными к sub_tab
-    sel_types = _get_extra_filters(sub_tab)
+    is_by_employees = "сотрудник" in sub_tab.lower()
+
+    # Фильтры — единые ключи, не зависят от подтаба
+    sel_types = _get_extra_filters()
     if not sel_types:
         st.warning("⚠️ Выберите типы нагрузки.")
         return
 
-    if "Сотр" in sub_tab:
+    if is_by_employees:
         _render_by_employees(df_main, df_country_main, cfg, emp_map, sel_types)
     else:
         _render_by_yuc(df_main, df_country_main, cfg, sel_types)
 
 
-def _get_extra_filters(sub_tab: str) -> list[str]:
-    """Фильтр Консультации/Запросы с ключами, зависящими от подтаба."""
-    suffix = "emp" if "Сотр" in sub_tab else "yuc"
+def _get_extra_filters() -> list[str]:
+    """Фильтр Консультации/Запросы."""
     cols = st.columns(2)
     selected = []
 
-    if cols[0].toggle("Консультации", value=True, key=f"extra_{suffix}_cons"):
+    if cols[0].toggle("Консультации", value=True, key="extra_cons"):
         selected.append(LoadType.CONSULT.value)
-    if cols[1].toggle("Запросы", value=True, key=f"extra_{suffix}_req"):
+    if cols[1].toggle("Запросы", value=True, key="extra_req"):
         selected.append(LoadType.REQUESTS.value)
 
     st.divider()
