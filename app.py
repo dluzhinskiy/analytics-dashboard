@@ -4,6 +4,12 @@
 Точка входа: streamlit run app.py
 """
 
+import sys
+from pathlib import Path
+
+# Streamlit Cloud может не добавлять директорию скрипта в sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import streamlit as st
 
 from config import AppConfig, TABS
@@ -72,7 +78,7 @@ def render_sidebar(df_all) -> AppConfig:
             st.session_state[f"yuc_{y}"] = new_val
 
     master_toggle = st.sidebar.toggle(
-        "**Включить / Выключить все**",
+        "✅ **Включить / Выключить все**",
         value=True,
         key="master_yuc",
         on_change=_on_master_change,
