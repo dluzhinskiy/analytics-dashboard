@@ -6,11 +6,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from config import AppConfig, COLORS_MAP
+from config import AppConfig, COLORS_MAP, LoadType
 from calculations import apply_calculations, calc_country_avg_by_employee, calc_country_avg_by_yuc
 from components import (
-    get_extra_type_filters,
-    select_employees,
     get_ordered_names,
     add_average_line,
     tab_header,
@@ -30,9 +28,11 @@ def render(
         "Анализ отображения:",
         ["👥 По сотрудникам", "🏢 По Юридическим Центрам"],
         horizontal=True,
+        key="extra_sub_tab",
     )
 
-    sel_types = get_extra_type_filters("extra")
+    # Фильтры с уникальными ключами, привязанными к sub_tab
+    sel_types = _get_extra_filters(sub_tab)
     if not sel_types:
         st.warning("⚠️ Выберите типы нагрузки.")
         return
@@ -43,6 +43,21 @@ def render(
         _render_by_yuc(df_main, df_country_main, cfg, sel_types)
 
 
+def _get_extra_filters(sub_tab: str) -> list[str]:
+    """Фильтр Консультации/Запросы с ключами, зависящими от подтаба."""
+    suffix = "emp" if "Сотр" in sub_tab else "yuc"
+    cols = st.columns(2)
+    selected = []
+
+    if cols[0].toggle("Консультации", value=True, key=f"extra_{suffix}_cons"):
+        selected.append(LoadType.CONSULT.value)
+    if cols[1].toggle("Запросы", value=True, key=f"extra_{suffix}_req"):
+        selected.append(LoadType.REQUESTS.value)
+
+    st.divider()
+    return selected
+
+
 def _render_by_employees(
     df_main: pd.DataFrame,
     df_country_main: pd.DataFrame,
@@ -51,7 +66,19 @@ def _render_by_employees(
     sel_types: list[str],
 ) -> None:
     """Подтаб «По сотрудникам»."""
-    real_names = select_employees(emp_map, cfg, key_prefix="extra_emp")
+    display_names = list(emp_map.values())
+
+    if cfg.show_emp_filter:
+        selected_display = st.multiselect(
+            "Сотрудники:",
+            display_names,
+            default=display_names,
+            key="extra_emp_select",
+        )
+    else:
+        selected_display = display_names
+
+    real_names = [name for name, display in emp_map.items() if display in selected_display]
     if not real_names:
         st.info("Нет данных.")
         return
