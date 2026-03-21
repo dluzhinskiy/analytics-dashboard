@@ -16,29 +16,25 @@ from help_texts import TAB_HELP
 
 
 # ==========================================
-# Заголовок вкладки с кнопкой справки
+# Заголовок вкладки с кликабельной справкой
 # ==========================================
 def tab_header(title: str, tab_key: str) -> None:
     """
-    Отрисовывает заголовок вкладки с кнопкой «?» справа.
+    Отрисовывает заголовок вкладки как кликабельную ссылку на справку.
 
-    При нажатии открывается модальное окно (st.dialog)
-    с документацией по вкладке.
+    Заголовок подчёркнут пунктиром, при наведении курсор меняется на «?».
+    При клике открывается модальное окно с документацией.
 
     Args:
         title: текст заголовка (например «Сравнение сотрудников»)
         tab_key: ключ вкладки из TABS (например «👥 Сотрудники»)
     """
-    col_title, col_btn = st.columns([10, 1])
-
-    with col_title:
-        st.header(title)
-
-    with col_btn:
-        # Немного отступа сверху, чтобы кнопка была на уровне заголовка
-        st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
-        if st.button("❓", key=f"help_{tab_key}", help="Показать справку по вкладке"):
-            _show_help_dialog(tab_key)
+    if st.button(
+        title,
+        key=f"help_{tab_key}",
+        type="tertiary",
+    ):
+        _show_help_dialog(tab_key)
 
 
 @st.dialog("📖 Справка", width="large")
@@ -183,20 +179,32 @@ def build_bar_chart(
     title: str = "",
     show_avg: bool = False,
     avg_value: float = 0.0,
+    hover_extra_cols: list[str] | None = None,
 ) -> go.Figure:
     """
     Строит bar chart: с группировкой по типу (без коэфф.) или сплошной (с коэфф.).
+
+    hover_extra_cols — дополнительные колонки для hover (например ['Регион']).
     """
+    hover_data = hover_extra_cols or []
+
     if cfg.use_coeffs:
-        grp = df.groupby(x)["Value"].sum().reset_index()
-        fig = px.bar(grp, x=x, y="Value", text_auto=".2f", title=title)
+        # При группировке нужно сохранить hover-колонки
+        group_cols = [x] + [c for c in hover_data if c in df.columns]
+        grp = df.groupby(group_cols)["Value"].sum().reset_index()
+        fig = px.bar(
+            grp, x=x, y="Value", text_auto=".2f", title=title,
+            hover_data=[c for c in hover_data if c in grp.columns],
+        )
         fig.update_traces(marker_color=COLOR_PRIMARY)
     else:
-        grp = df.groupby([x, "Тип"])["Value"].sum().reset_index()
+        group_cols = [x, "Тип"] + [c for c in hover_data if c in df.columns]
+        grp = df.groupby(group_cols)["Value"].sum().reset_index()
         fig = px.bar(
             grp, x=x, y="Value",
             color="Тип", color_discrete_map=COLORS_MAP,
             text_auto=".2f", title=title,
+            hover_data=[c for c in hover_data if c in grp.columns],
         )
 
     if show_avg and cfg.show_avg:

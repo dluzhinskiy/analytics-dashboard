@@ -54,6 +54,25 @@ st.markdown(
     .nav-tabs div[role="radiogroup"] > label:hover { filter: brightness(0.85); }
     .nav-tabs div[role="radiogroup"] > label p { margin: 0; font-weight: 600; }
     .stNumberInput label { display: none; }
+
+    /* Кликабельные заголовки-справки: пунктирное подчёркивание + курсор-вопрос */
+    button[kind="tertiary"] {
+        text-decoration: underline dashed !important;
+        text-decoration-color: rgba(150, 150, 150, 0.6) !important;
+        text-underline-offset: 4px !important;
+        cursor: help !important;
+        font-size: 1.5rem !important;
+        font-weight: 700 !important;
+        padding: 0 !important;
+    }
+    button[kind="tertiary"]:hover {
+        text-decoration-color: rgba(100, 100, 100, 0.9) !important;
+    }
+    /* В сайдбаре — чуть меньший шрифт */
+    section[data-testid="stSidebar"] button[kind="tertiary"] {
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -80,27 +99,32 @@ def render_sidebar(df_all) -> AppConfig:
             st.session_state[f"yuc_{y}"] = new_val
 
     master_toggle = st.sidebar.toggle(
-        "✅ **Включить / Выключить все**",
+        "**Включить / Выключить все**",
         value=True,
         key="master_yuc",
         on_change=_on_master_change,
     )
     st.sidebar.divider()
 
-    selected_yucs = [
-        y for y in all_yucs
-        if st.sidebar.toggle(y, value=True, key=f"yuc_{y}")
-    ]
+    selected_yucs = []
+    for y in all_yucs:
+        key = f"yuc_{y}"
+        # Не передаём value= если ключ уже в session_state (иначе Streamlit ругается)
+        if key in st.session_state:
+            val = st.sidebar.toggle(y, key=key)
+        else:
+            val = st.sidebar.toggle(y, value=True, key=key)
+        if val:
+            selected_yucs.append(y)
 
     # --- Коэффициенты ---
     st.sidebar.divider()
-    c_title, c_help = st.sidebar.columns([5, 1])
-    with c_title:
-        st.subheader("Приведенные показатели")
-    with c_help:
-        st.markdown("<div style='height: 0.3rem'></div>", unsafe_allow_html=True)
-        if st.button("❓", key="help_coeffs", help="Справка по коэффициентам"):
-            _show_coeffs_help()
+    if st.sidebar.button(
+        "Приведенные показатели",
+        key="help_coeffs",
+        type="tertiary",
+    ):
+        _show_coeffs_help()
     use_coeffs = st.sidebar.toggle("Включить коэффициенты", value=False)
 
     coefficients = _render_coefficient_inputs(use_coeffs)
