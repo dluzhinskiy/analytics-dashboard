@@ -99,11 +99,13 @@ def _render_by_employees(
     avg_country = calc_country_avg_by_employee(df_country_main, sel_types, cfg)
     ordered = get_ordered_names(df_sub)
 
-    grp = df_sub.groupby(["Display", "Тип"])["Value"].sum().reset_index()
+    grp = df_sub.groupby(["Display", "Тип"] + (["Регион"] if "Регион" in df_sub.columns else []))["Value"].sum().reset_index()
+    hover_cols = ["Регион"] if "Регион" in grp.columns else []
     fig = px.bar(
         grp, x="Display", y="Value",
         color="Тип", color_discrete_map=COLORS_MAP,
         text_auto=".2f",
+        hover_data=hover_cols,
     )
     fig.update_xaxes(categoryorder="array", categoryarray=ordered)
 

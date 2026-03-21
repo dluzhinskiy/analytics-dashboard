@@ -58,10 +58,11 @@ def render(
     if cfg.use_coeffs:
         title += " (с учетом коэффициентов)"
 
-    # Построение графика
+    # Построение графика (с регионом в hover)
     fig = build_bar_chart(
         df_sub, x="Display", cfg=cfg, title=title,
         show_avg=True, avg_value=avg_country,
+        hover_extra_cols=["Регион"],
     )
 
     # Упорядочивание по ЮЦ и значению
