@@ -9,6 +9,40 @@ import streamlit as st
 from config import AppConfig
 from calculations import apply_calculations
 from components import get_main_type_filters, tab_header
+from capitals import REGION_CAPITALS
+
+import re
+
+
+def _find_capital(region: str) -> tuple[str, float, float] | None:
+    """
+    Находит столицу региона с нормализацией тире и пробелов.
+
+    GeoJSON может содержать разные варианты тире (-, –, —)
+    и разное количество пробелов вокруг них.
+    """
+    # Прямое совпадение
+    cap = REGION_CAPITALS.get(region)
+    if cap:
+        return cap
+
+    # Нормализация: заменяем любые тире и пробелы вокруг на единый формат
+    def normalize(s: str) -> str:
+        return re.sub(r"\s*[—–\-]\s*", " - ", s).strip().lower()
+
+    norm_region = normalize(region)
+    for key, val in REGION_CAPITALS.items():
+        norm_key = normalize(key)
+        if norm_key == norm_region:
+            return val
+
+    # Совпадение по началу строки (GeoJSON может опускать суффиксы вроде «- Югра»)
+    for key, val in REGION_CAPITALS.items():
+        norm_key = normalize(key)
+        if norm_key.startswith(norm_region) or norm_region.startswith(norm_key):
+            return val
+
+    return None
 
 
 # Контрастные цвета для ЮЦ — подобраны так, чтобы соседние регионы
@@ -190,31 +224,37 @@ def _prepare_distribution_data(
 
         if is_selected and n_lawyers > 0 and yuc:
             crown = "👑 " if region in CROWN_REGIONS else ""
+            cap = _find_capital(region)
+            cap_line = f"<br><i>Столица: {cap[0]}</i>" if cap else ""
             rows.append({
                 "Регион": region,
                 "ЮЦ": yuc,
                 "color": yuc_color_map.get(yuc, YUC_COLORS[0]),
-                "hover": f"<b>{crown}{region}</b><br>ЮЦ: {yuc}<br>Юристов: {n_lawyers}",
+                "hover": f"<b>{crown}{region}</b><br>ЮЦ: {yuc}<br>Юристов: {n_lawyers}{cap_line}",
                 "group": "active",
                 "lawyers_count": n_lawyers,
                 "is_crown": region in CROWN_REGIONS,
             })
         elif is_selected:
+            cap = _find_capital(region)
+            cap_line = f"<br><i>Столица: {cap[0]}</i>" if cap else ""
             rows.append({
                 "Регион": region,
                 "ЮЦ": yuc or "—",
                 "color": COLOR_NO_LAWYER,
-                "hover": f"<b>{region}</b><br>Нет юриста",
+                "hover": f"<b>{region}</b><br>Нет юриста{cap_line}",
                 "group": "no_lawyer",
                 "lawyers_count": 0,
                 "is_crown": False,
             })
         else:
+            cap = _find_capital(region)
+            cap_line = f"<br><i>Столица: {cap[0]}</i>" if cap else ""
             rows.append({
                 "Регион": region,
                 "ЮЦ": yuc or "—",
                 "color": COLOR_UNSELECTED,
-                "hover": f"<b>{region}</b><br>ЮЦ не выбран",
+                "hover": f"<b>{region}</b><br>ЮЦ не выбран{cap_line}",
                 "group": "unselected",
                 "lawyers_count": 0,
                 "is_crown": False,
@@ -313,6 +353,9 @@ def _render_distribution_map_figure(
             showlegend=False,
         ))
 
+    # Точки столиц
+    _add_capital_dots(fig, df_dist["Регион"].tolist())
+
     fig.update_layout(
         mapbox_style="white-bg",
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
@@ -406,12 +449,20 @@ def _format_hover(row: pd.Series, sel_types: list[str], use_coeffs: bool) -> str
     """Форматирует hover-текст для одного региона."""
     region = row["Регион"]
     value = row["Value"]
+    capital_info = _find_capital(region)
+    capital_line = f"<i>Столица: {capital_info[0]}</i>" if capital_info else ""
 
     if value == 0:
-        return f"<b>{region}</b><br>нет данных/юриста"
+        parts = [f"<b>{region}</b>", "нет данных/юриста"]
+        if capital_line:
+            parts.append(capital_line)
+        return "<br>".join(parts)
 
     if use_coeffs:
-        return f"<b>{region}</b><br>Единое приведенное значение: {value:.2f}"
+        parts = [f"<b>{region}</b>", f"Единое приведенное значение: {value:.2f}"]
+        if capital_line:
+            parts.append(capital_line)
+        return "<br>".join(parts)
 
     lines = [f"<b>{region}</b>"]
     for t in sel_types:
@@ -419,6 +470,8 @@ def _format_hover(row: pd.Series, sel_types: list[str], use_coeffs: bool) -> str
         if t_val > 0:
             lines.append(f"{t}: {t_val:.2f}")
     lines.append(f"<b>Всего: {value:.2f}</b>")
+    if capital_line:
+        lines.append(capital_line)
     return "<br>".join(lines)
 
 
@@ -437,9 +490,41 @@ def _build_region_yuc_map(
     return reg_to_yuc
 
 
+def _add_capital_dots(fig: go.Figure, regions: list[str]) -> None:
+    """
+    Добавляет точки столиц регионов на карту.
+
+    Точки только визуальные — hover отключён, название столицы
+    отображается в hover самого региона (choropleth).
+    """
+    lats, lons = [], []
+    for region in regions:
+        cap = _find_capital(region)
+        if cap:
+            lats.append(cap[1])
+            lons.append(cap[2])
+
+    if lats:
+        fig.add_trace(go.Scattermapbox(
+            lat=lats,
+            lon=lons,
+            mode="markers",
+            marker=dict(size=4, color="#333333", opacity=0.7),
+            hoverinfo="skip",
+            showlegend=False,
+            name="Столицы",
+        ))
+
+
 def _build_all_gray_map(geojson: dict) -> go.Figure:
     """Полностью серая карта (когда нет выбранных ЮЦ)."""
     all_regions = [f["properties"]["name"] for f in geojson["features"]]
+    hovers = []
+    for r in all_regions:
+        cap = _find_capital(r)
+        cap_line = f"<br><i>Столица: {cap[0]}</i>" if cap else ""
+        hovers.append(f"<b>{r}</b>{cap_line}")
+
     fig = go.Figure()
     fig.add_trace(go.Choroplethmapbox(
         geojson=geojson,
@@ -450,10 +535,11 @@ def _build_all_gray_map(geojson: dict) -> go.Figure:
         marker_opacity=0.5,
         marker_line_width=0.3,
         marker_line_color="#555555",
-        hovertext=[f"<b>{r}</b>" for r in all_regions],
+        hovertext=hovers,
         hovertemplate="%{hovertext}<extra></extra>",
         showscale=False,
     ))
+    _add_capital_dots(fig, all_regions)
     fig.update_layout(
         mapbox_style="white-bg",
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
@@ -517,6 +603,14 @@ def _build_heatmap_figure(
             hovertemplate="%{hovertext}<extra></extra>",
             showscale=False,
         ))
+
+    # Точки столиц
+    all_regions = (
+        df_active["Регион"].tolist()
+        + df_zero["Регион"].tolist()
+        + df_other["Регион"].tolist()
+    )
+    _add_capital_dots(fig, all_regions)
 
     fig.update_layout(
         mapbox_style="white-bg",
