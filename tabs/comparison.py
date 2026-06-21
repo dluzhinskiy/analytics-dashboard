@@ -14,6 +14,15 @@ COURT_UNACCOUNTED = "СД Н (неучтенные)"
 ADMIN_UNACCOUNTED = "АД Н (неучтенные)"
 
 
+def _change_cell_style(value: float) -> str:
+    """Зелёная подсветка роста, красная — снижения, ноль остаётся нейтральным."""
+    if pd.isna(value) or value == 0:
+        return ""
+    if value > 0:
+        return "background-color: #DCFCE7; color: #166534; font-weight: 600;"
+    return "background-color: #FEE2E2; color: #991B1B; font-weight: 600;"
+
+
 def _render_type_filters() -> list[str]:
     """Пять типов общей нагрузки; на вкладке сравнения все включены по умолчанию."""
     labels = [
@@ -226,9 +235,13 @@ def render(
             "Изменение, %": diff / v25 * 100 if v25 else None,
         })
     detail = pd.DataFrame(rows).sort_values("Изменение", ascending=False)
+    styled_detail = detail.style.map(
+        _change_cell_style,
+        subset=["Изменение", "Изменение, %"],
+    )
     st.subheader("Детализация по ЮЦ")
     st.dataframe(
-        detail,
+        styled_detail,
         width="stretch",
         hide_index=True,
         column_config={
