@@ -21,6 +21,7 @@ from data_loader import (
 from tabs.comparison import (
     ADMIN_UNACCOUNTED,
     COURT_UNACCOUNTED,
+    _change_cell_style,
     prepare_comparison_data,
 )
 
@@ -85,6 +86,11 @@ class ComparisonTests(unittest.TestCase):
             float(forecast["Value"].sum()),
             float(regular["Value"].sum()) * FORECAST_FACTOR_2026,
         )
+
+    def test_change_colors(self):
+        self.assertIn("#DCFCE7", _change_cell_style(1))
+        self.assertIn("#FEE2E2", _change_cell_style(-1))
+        self.assertEqual(_change_cell_style(0), "")
 
     def test_marked_2025_employees_have_zero_load(self):
         marked = self.raw_2025["Уволен\\ЕЦПО"].astype(str).str.contains(
